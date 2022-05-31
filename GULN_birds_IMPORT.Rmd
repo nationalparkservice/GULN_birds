@@ -1,0 +1,68 @@
+---
+title: "GULN birds - import and format data"
+author: Ellen Cheng
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: kable
+    fig_caption: yes
+    highlight: haddock
+    keep_md: yes
+    smart: no
+    theme: journal
+    number_sections: yes
+    toc: yes
+    toc_float: 
+      collapse: true
+    toc_depth: 3
+  html_notebook:
+    chunk_output_type: inline
+  word_document:
+    toc: yes
+    toc_depth: 3
+  pdf_document:
+    df_print: kable
+    highlight: haddock
+    fig_caption: yes
+    keep_tex: yes
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+---
+```{r setup, include = FALSE}
+rm(list=ls())
+
+pkgs <- c("readr", "tidyverse", "here", "janitor", "magrittr", "lubridate")
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
+lapply(pkgs, library, character.only = TRUE)
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%", cache = FALSE, tidy = TRUE)
+```
+
+```{r import_format}
+### Import and format data ----
+
+# Read in data and standardize column names
+df_locs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SampleLocations_2019-2021.csv")) %>%
+  janitor::clean_names("snake") # point lat-longs
+
+df_sitecovs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SiteConditions_2019-2021.csv")) %>%
+  janitor::clean_names("snake") %>%
+  dplyr::mutate(event_date = lubridate::mdy(date)) %>% # event covariate data--match using location_name and event_date
+  dplyr::select(-date)
+
+
+df_finaldat <- read_csv(here::here("Data_in", "GULN_AllParks_BBirdObservations_Accepted_2019-2021.csv"),
+                    col_types = cols(PointNotes = col_character(), 
+                                     EventComments = col_character())) %>%
+  janitor::clean_names("snake") %>%
+  dplyr::rename(yr = year, mnth = month) %>%
+  dplyr::mutate(event_date = lubridate::mdy(date)) %>%
+  dplyr::select(-day, -date)
+
+# Save files
+saveRDS(df_locs, here::here("Data_out", "df_locs.RDS"))
+saveRDS(df_sitecovs, here::here("Data_out", "df_sitecovs.RDS"))
+saveRDS(df_finaldat, here::here("Data_out", "df_finaldat.RDS"))
+```

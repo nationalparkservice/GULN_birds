@@ -1,0 +1,208 @@
+---
+title: "GULN birds - EDA of 2016-2021 data"
+author: Ellen Cheng
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  html_document:
+    df_print: kable
+    fig_caption: yes
+    highlight: haddock
+    keep_md: yes
+    smart: no
+    theme: journal
+    number_sections: yes
+    toc: yes
+    toc_float: 
+      collapse: true
+    toc_depth: 3
+  html_notebook:
+    chunk_output_type: inline
+  word_document:
+    toc: yes
+    toc_depth: 3
+  pdf_document:
+    df_print: kable
+    highlight: haddock
+    fig_caption: yes
+    keep_tex: yes
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+---
+```{r setup, include = FALSE}
+rm(list=ls())
+
+pkgs <- c("readr", "janitor", "tidyverse", "here", "magrittr", "data.table", "lubridate", "ggthemes", "gridExtra", "grid", "ggforce", "scales", "plotly", "knitr", "DT", "crosstalk", "echarts4r")
+installed_pkgs <- pkgs %in% installed.packages()
+if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
+lapply(pkgs, library, character.only = TRUE)
+
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%", cache = FALSE, tidy = TRUE)
+```
+
+```{r functions, include = FALSE}
+
+  
+```
+
+```{r}
+# Read in formatted data
+df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
+df_sitecovs <- readRDS(here::here("Data_out", "df_sitecovs.RDS")) # event covariate data 
+df_finaldat <- readRDS(here::here("Data_out", "df_finaldat.RDS")) # cleaned point count data
+
+# Count # of individuals detected per species-loc-survey
+df_summary_counts <- df_finaldat %>%
+  dplyr::select(site_name, unit_code, location_name, protocol, yr, count, species_code, common_name, scientific_name, breeder, within_year_visit, event_date) %>%
+    dplyr::group_by(location_name, yr, event_date, species_code) %>%
+    dplyr::mutate(
+      sum_indiv = sum(count, na.rm = TRUE),
+      yr_visit = paste0(yr, "_", within_year_visit)) %>%
+    dplyr::ungroup() %>%
+  dplyr::select(-count) %>%
+  dplyr::distinct() %>%
+  dplyr::arrange(location_name, yr, within_year_visit, species_code)
+```
+
+# Overview of Protocol and Data
+
+## Monitoring Objective
+Document species richness and composition of breeding landbirds during annual visits to the parks and assess long-term trends in occupancy and the relative abundance or density for the most common  species.
+
+## Sites and Sampling Frequency
+Point counts are conducted twice per breeding season (May - June) at at each of six parks within the Gulf Coast Network. Each park has 21 to 33 randomly selected, permanent point count locations, for a total of N = 179 point plots across the region.
+
+The sampling frame excludes narrow buffers (25-50 meters) around park boundaries, and points are required to be at least 200–250 meters apart. The smaller buffer sizes are used in situations where the original buffers and distances could not accommodate the full set of points within the sampling frame polygon. Points are distributed as a simple random draw from within park boundaries, rather than targeting specific habitats or areas. For three parks, the sampling frame was a buffered polygon around the whole park, allowing for park-wide inference. For the remaining three parks, the network selected one or more contiguous units of the park as the sampling frame, to prevent excessive travel time, or to accommodate safety or park management interest. In one case (Jean Lafitte NHP&P), the sampling frame was buffered corridors along trails and roads, due to challenges with access into flooded areas of the park. For all six parks, the points were drawn from the whole sampling frame, but if a point was on or within 50 meters (164 ft) of a road, parking lot, or building, the next available alternate point was used instead.
+
+All of a park’s points are visited within a four-day to two-week period, with 3–8 points completed each day. All points are resampled within two and ten days after the initial sampling and must be conducted between dawn and 10:30 a.m.
+
+
+```{r}
+# Table of number of points surveyed per park and year
+```
+
+```{r}
+# Map of point count locations
+```
+
+## Conducting Variable Circular Plot Point Counts
+
+An observer navigates to the point-count location by GPS, and over a 10-minute period, records the number of individuals seen or heard of each bird species. The observer also records the distance of each bird from the observer’s location and the minute the bird was first observed. Distances are recorded in bands of 0–25 meters (0–82 feet [ft]), 25–50 meters (82–164 ft), 50–100 meters (164–328 ft) and greater than 100 meters (328 ft). Once a bird is detected and recorded (), it is removed from further consideration, reducing the probability that any individual bird is counted twice. Each point is re-sampled within ten days of the initial sample.
+
+## Covariate Data
+
+## Data Analysis
+
+# Exploratory Data Analysis - Summary by Species
+
+For EDA, I used a subset of data that:
+
+* 
+
+* 
+
+* 
+
+SELECT A SPECIES
+```{r}  
+shared_summary_counts <- SharedData$new(df_summary_counts, key = ~unit_code, group = "count_summaries") 
+
+
+# %>% 
+#     dplyr::mutate(HoverLabel = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Common Name: ", common_name, "<br>Species Code: ", species_code, "<br># Detected Indiv: ", sum_indiv))
+  # dplyr::select(site_name, unit_code, species_code, common_name, location_name, yr, within_year_visit, sum_indiv) %>%
+  # dplyr::right_join(tidyr::expand_grid(yr = unique(.$yr), within_year_visit = unique(.$within_year_visit), location_name = unique(.$location_name)), by = c("yr", "within_year_visit", "location_name")) %>% 
+  # dplyr::arrange(location_name, yr, within_year_visit) %>%
+  # dplyr::mutate(yr_visit = paste0(yr, "_", within_year_visit)) %>%
+  # dplyr::mutate(sum_indiv = replace_na(sum_indiv, 0))
+# )
+  
+# filter_select("site_name", "Select an NPS Unit", shared_summary_counts, multiple = FALSE, ~site_name)
+
+filter_select("common_name", "Select a Species", shared_summary_counts, multiple = FALSE, ~common_name)
+
+```
+
+## Count Summaries
+
+COUNT SUMMARY BY PARK & SURVEY
+
+Grouped horizontal box plots--each group is for a species, with one boxplot per year. Arranged with most common at top, calculated as highest average count. Metric is # of individuals per point-survey. User selects park
+
+```{r}
+
+```
+
+COUNT SUMMARY BY POINT & SURVEY
+
+Heat maps showing number of individuals detected per species by point and survey event. User selects park and species. This figure shows the data per point and survey event. Rows are points and columns are survey events, column facets are years. Note that colors are rescaled for each selection. Legend scale should be prominent, with summary of quartiles in title or subtitle.
+
+```{r fig.height = 12}
+# Heat map
+
+plot_ly(
+  shared_summary_counts,
+  x= ~ yr_visit,
+  y= ~ location_name,
+  z = ~ sum_indiv,
+  color = ~sum_indiv,
+  fill = ~sum_indiv,
+  type = "heatmap"
+)
+
+```
+
+COUNTS VS. COVARIATES
+
+## Detection Times and Distances 
+
+DETECTION SUMMARY BY PARK
+Histogram of detection distance - all data. Grouped by Park (and/or by habitat type). Width of histogram bars should be scaled.
+
+Histogram of time-to-detection - all data. Grouped by Park (and/or by habitat type)
+
+DETECTION SUMMARY BY POINT & SURVEY
+## Drill-Down on Detection Times and Distances
+
+
+
+DETECTION VS. COVARIATES
+# Appendix of Interactive Graphs and Tables
+
+```{r}
+# Convert to shared data class to allow user selection. The 'group' argument allows both data frames to be selected with a single filter
+# shared_df_final <- SharedData$new(df_final, ~cave, group = "select_by_cave") 
+# shared_df_long <- SharedData$new(df_long, ~cave, group = "select_by_cave")
+# 
+# crosstalk::filter_select(id = "sel_cave", label = "Select a cave", sharedData = shared_df_final, multiple = FALSE, group = ~cave)
+```
+
+```{r}
+
+# FuncPlotCaves(func_dat = shared_df_final)
+# plot_ly(
+#   shared_df_final,
+#   x= ~ event_date,
+#   y= ~ summary_maxem,
+#   group = ~event_date,
+#   color = ~method,
+#   # shape = ~total_duration==75,
+#   text = ~paste("Cave: ", cave, "<br>Entrance: ", entrance, "<br>Survey Date: ", event_date, "<br>Method: ", method, "<br>Maxem: ", summary_maxem, "<br>Surveyor: ", surveyor, "<br>Weather: ", weather, "<br>Wind Strength: ", wind_strength, "<br>Infrared Light Used: ", infrared_light_used, "<br>Human Disturbance: ", human_disturbance, "<br>Data Entry Flag: ", has_data_entry_flag),
+#   type = "scatter",
+#   mode = "markers",
+#   size = 2) %>%
+#   layout(
+#     title = "Maximum Emergence Counts by Method and Date<br><sub>Open circles are incomplete surveys (missing intervals)</sub>",
+#     xaxis = list(
+#       title = "Survey Date",
+#       showspikes = TRUE),
+#     yaxis = list(
+#       title = "Maximum Emergence Count"
+#     ),
+#     legend = list(
+#       orientation = "h",
+#       xanchor = "center",
+#       x = 0.5,
+#       y = 1.1)
+#     )
+```
