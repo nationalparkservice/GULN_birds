@@ -51,7 +51,14 @@ df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
 df_sitecovs <- readRDS(here::here("Data_out", "df_sitecovs.RDS")) # event covariate data 
 df_finaldat <- readRDS(here::here("Data_out", "df_finaldat.RDS")) # cleaned point count data
 
-# Count # of individuals detected per species-loc-survey
+# Count # of individuals detected per species-loc-survey. Need to add in zero's!
+template <- merge(
+  df_sitecovs %>% dplyr::select(location_name, event_date) %>% dplyr::distinct(),
+  sort(unique(df_finaldat$species_code)))
+
+test <- df_finaldat %>%
+  full_join(template, by = c("site_name", "unit_code", "location_name", ""))
+
 df_summary_counts <- df_finaldat %>%
   dplyr::select(site_name, unit_code, location_name, protocol, yr, count, species_code, common_name, scientific_name, breeder, within_year_visit, event_date) %>%
     dplyr::group_by(location_name, yr, event_date, species_code) %>%
@@ -63,6 +70,9 @@ df_summary_counts <- df_finaldat %>%
   dplyr::select(-count) %>%
   dplyr::distinct() %>%
   dplyr::arrange(location_name, yr, within_year_visit, species_code)
+
+df_species_counts <- df_finaldat %>%
+  dplyr::
 ```
 
 # Overview of Protocol and Data
@@ -103,6 +113,9 @@ For EDA, I used a subset of data that:
 * 
 
 * 
+
+## Species Summaries
+Table showing average detections/survey by species and year. Row is species (sorted highest total first) and column is year. Need to account for zeroes. 
 
 SELECT A SPECIES
 ```{r}  
