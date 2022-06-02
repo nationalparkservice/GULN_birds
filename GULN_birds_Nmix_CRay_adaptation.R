@@ -1,3 +1,4 @@
+### Hierarchical models
 ### ADAPTATION OF C.RAY 2017 CODE, FOR USE WITH GULN BIRDS DATA
 
 # Adapts the pre-processed survey and point data for use in hierarchical models, and

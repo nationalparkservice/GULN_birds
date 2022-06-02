@@ -1,6 +1,5 @@
 ---
-title: "GULN birds - import and format data"
-author: Ellen Cheng
+title: "GULN Birds - Preliminary Data Checks"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
@@ -32,7 +31,7 @@ output:
 ```{r setup, include = FALSE}
 rm(list=ls())
 
-pkgs <- c("readr", "tidyverse", "here", "janitor", "magrittr", "lubridate")
+pkgs <- c("readr", "tidyverse", "here", "janitor", "magrittr", "lubridate", "data.table", "knitr")
 installed_pkgs <- pkgs %in% installed.packages()
 if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
 lapply(pkgs, library, character.only = TRUE)
@@ -52,7 +51,6 @@ df_sitecovs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SiteCondition
   dplyr::mutate(event_date = lubridate::mdy(date)) %>% # event covariate data--match using location_name and event_date
   dplyr::select(-date)
 
-
 df_finaldat <- read_csv(here::here("Data_in", "GULN_AllParks_BBirdObservations_Accepted_2019-2021.csv"),
                     col_types = cols(PointNotes = col_character(), 
                                      EventComments = col_character())) %>%
@@ -60,9 +58,191 @@ df_finaldat <- read_csv(here::here("Data_in", "GULN_AllParks_BBirdObservations_A
   dplyr::rename(yr = year, mnth = month) %>%
   dplyr::mutate(event_date = lubridate::mdy(date)) %>%
   dplyr::select(-day, -date)
+df_finaldat$unit_code[str_detect(df_finaldat$location_name, "GUISFL")] <- "GUIS-FL"
+df_finaldat$unit_code[str_detect(df_finaldat$location_name, "GUISMS")] <- "GUIS-MS"
+
+df_species <- read_csv(here::here("Data_in", "Park_lists_2017.csv")) %>%
+  janitor::clean_names("snake") %>%
+  dplyr::rename(
+    unit_code = park,
+    species_code = x4_letter_code, 
+    scientific_name = latin_name)
+# Fill in missing data
+
 
 # Save files
-saveRDS(df_locs, here::here("Data_out", "df_locs.RDS"))
-saveRDS(df_sitecovs, here::here("Data_out", "df_sitecovs.RDS"))
-saveRDS(df_finaldat, here::here("Data_out", "df_finaldat.RDS"))
+# saveRDS(df_locs, here::here("Data_out", "df_locs.RDS"))
+# saveRDS(df_sitecovs, here::here("Data_out", "df_sitecovs.RDS"))
+# saveRDS(df_finaldat, here::here("Data_out", "df_finaldat.RDS"))
+# saveRDS(df_species, here::here("Data_out", "df_species.RDS"))
+```
+
+<span style="font-size:14px; color:blue; font-weight:bold;">
+NOTE 1: In all files, GUIS location has been recoded to GUIS-FL or GUIS-MS.
+</span>
+
+<span style="font-size:14px; color:blue; font-weight:bold;">
+NOTE 2: Only the first 10 records are shown for each table. Use the Previous/Next or page number buttons under each table to see additional records. Table records can be filtered, sorted, and exported. To export ALL records, select `Show 'All' entries` before clicking an export button.
+
+</span>
+
+# Species that require update in Park Species List
+
+*These species were detected in point counts but are not recorded in the park species list as `Present in GULN Point Count.`*
+
+<span style="font-size:14px; color:red; font-weight:bold;">
+Please update the following species in the park species list. For the corresponding park, set `Present in GULN Point Count`  = `yes`, then re-import the updated park species list.
+</span>
+
+```{r}
+count_species_by_park <- unique(df_finaldat[, c("unit_code", "species_code", "scientific_name", "common_name")])
+list_species_by_park <- subset(df_species, present_in_guln_point_count == "yes", select = c("unit_code", "species_code"))
+
+update_species <- anti_join(count_species_by_park, list_species_by_park, by = c("unit_code", "species_code")) %>% dplyr::arrange(unit_code, species_code)
+if(nrow(update_species) > 0) {
+  update_species %>% DT::datatable(
+    ., 
+    class="compact stripe",
+    rownames= FALSE,
+    extensions = 'Buttons',
+    filter = 'top', 
+    options = list(
+      autoWidth = TRUE,
+      dom = 'Blfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+      lengthMenu = list(c(10,30,50,-1),
+                        c(10,30,50,"All")),
+      pageLength = 10,
+      columnDefs = list(list(className = 'dt_center', targets = "_all"))
+    )
+  )
+} else {
+  cat("No point locations require update")
+}
+```
+
+# Point locations that require update in Sample Locations file
+
+*These point locations were detected in point counts but are not recorded in the sample locations file.`*
+
+<span style="font-size:14px; color:red; font-weight:bold;">
+Please add the following locations (with datum, latitude, and longitude) to the sample locations file, then re-import the updated sample locations file.
+</span>
+
+```{r}
+update_locs <- sort(unique(df_finaldat$location_name)[!unique(df_finaldat$location_name) %in% df_locs$location_name])
+if(length(update_locs) > 0) {
+  kable(data.frame(location_name = update_locs))
+} else {
+  cat("No point locations require update")
+}
+```
+
+# Survey events that require corresponding record in Site Conditions file
+
+*These survey events were reported in point counts but are not recorded in the site conditions file.`*
+
+<span style="font-size:14px; color:red; font-weight:bold;">
+Please add the following survey events (with survey covariate information) to the site conditions file, then re-import the updated site conditions file.
+</span>
+
+```{r}
+events_in_counts <- unique(df_finaldat[, c("unit_code", "location_name", "event_date")])
+events_in_conditions <- subset(df_sitecovs, select = c("location_name", "event_date"))
+
+update_events <- anti_join(events_in_counts, events_in_conditions, by = c("location_name", "event_date")) %>% dplyr::arrange(unit_code, location_name, event_date)
+
+if(nrow(update_events) > 0) {
+  update_events %>% DT::datatable(
+    ., 
+    class="compact stripe",
+    rownames= FALSE,
+    extensions = 'Buttons',
+    filter = 'top', 
+    options = list(
+      autoWidth = TRUE,
+      dom = 'Blfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+      lengthMenu = list(c(10,30,50,-1),
+                        c(10,30,50,"All")),
+      pageLength = 10,
+      columnDefs = list(list(className = 'dt_center', targets = "_all"))
+    )
+  )
+} else {
+  cat("No survey events require update")
+}
+```
+
+# Count records with unusual count entries
+
+*These bird observation records have zero (0) or NA in the `count` column.*
+
+<span style="font-size:14px; color:red; font-weight:bold;">
+Please fix the `count` entry for the following bird observation records, then re-import the updated bird observations file.
+</span>
+
+```{r}
+fix_counts <- df_finaldat %>%
+  dplyr::filter(is.na(count) | count == 0) %>%
+  dplyr::select(unit_code, location_name, event_date, species_code, scientific_name, common_name, count) 
+
+if(nrow(fix_counts) > 0) {
+  fix_counts %>% 
+  DT::datatable(
+    ., 
+    class="compact stripe",
+    rownames= FALSE,
+    extensions = 'Buttons',
+    filter = 'top', 
+    options = list(
+      autoWidth = TRUE,
+      dom = 'Blfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+      lengthMenu = list(c(10,30,50,-1),
+                        c(10,30,50,"All")),
+      pageLength = 10,
+      columnDefs = list(list(className = 'dt_center', targets = "_all"))
+    )
+  )
+} else {
+  cat("No observation records require update")
+}
+```
+
+# Count records with some missing (important) information
+
+*These bird observation records have a missing value (NA) in at least one of these columns: location_name, event_date, species_code, time_bin_id, distance_bin_id, count, data_status.*
+
+<span style="font-size:14px; color:red; font-weight:bold;">
+Please add the missing information in the following bird observation records, then re-import the updated bird observations file.
+</span>
+
+```{r}
+incomplete_records <- df_finaldat %>%
+  dplyr::select(location_name, event_date, species_code, time_bin_id, distance_bin_id, count, data_status) %>%
+  dplyr::filter(!complete.cases(.)) %>%
+  dplyr::arrange(location_name, event_date, species_code)
+
+if(nrow(incomplete_records) > 0) {
+  incomplete_records %>% 
+  DT::datatable(
+    ., 
+    class="compact stripe",
+    rownames= FALSE,
+    extensions = 'Buttons',
+    filter = 'top', 
+    options = list(
+      autoWidth = TRUE,
+      dom = 'Blfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+      lengthMenu = list(c(10,30,50,-1),
+                        c(10,30,50,"All")),
+      pageLength = 10,
+      columnDefs = list(list(className = 'dt_center', targets = "_all"))
+    )
+  )
+} else {
+  cat("No observation records are missing important information")
+}
 ```

@@ -57,8 +57,9 @@ df_summary_counts <- df_finaldat %>%
     dplyr::group_by(location_name, yr, event_date, species_code) %>%
     dplyr::mutate(
       sum_indiv = sum(count, na.rm = TRUE),
-      yr_visit = paste0(yr, "_", within_year_visit)) %>%
+      yr_visit = factor(paste0(yr, "_", within_year_visit))) %>%
     dplyr::ungroup() %>%
+    dplyr::mutate(hover_label = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Code: ", species_code, "<br>Species Scientific Name: ", scientific_name, "<br>Species Common Name: ", common_name, "<br># Detected Indiv: ", sum_indiv)) %>%
   dplyr::select(-count) %>%
   dplyr::distinct() %>%
   dplyr::arrange(location_name, yr, within_year_visit, species_code)
@@ -105,22 +106,19 @@ For EDA, I used a subset of data that:
 
 SELECT A SPECIES
 ```{r}  
-shared_summary_counts <- SharedData$new(df_summary_counts, key = ~unit_code, group = "count_summaries") 
+shared_summary_counts <- SharedData$new(df_summary_counts, group = "species_code") 
 
+filter_select(id = "species_code", label = "Select a Species", sharedData = shared_summary_counts, multiple = FALSE, group = ~species_code)
 
-# %>% 
-#     dplyr::mutate(HoverLabel = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Common Name: ", common_name, "<br>Species Code: ", species_code, "<br># Detected Indiv: ", sum_indiv))
-  # dplyr::select(site_name, unit_code, species_code, common_name, location_name, yr, within_year_visit, sum_indiv) %>%
-  # dplyr::right_join(tidyr::expand_grid(yr = unique(.$yr), within_year_visit = unique(.$within_year_visit), location_name = unique(.$location_name)), by = c("yr", "within_year_visit", "location_name")) %>% 
-  # dplyr::arrange(location_name, yr, within_year_visit) %>%
-  # dplyr::mutate(yr_visit = paste0(yr, "_", within_year_visit)) %>%
-  # dplyr::mutate(sum_indiv = replace_na(sum_indiv, 0))
-# )
-  
-# filter_select("site_name", "Select an NPS Unit", shared_summary_counts, multiple = FALSE, ~site_name)
+```
 
-filter_select("common_name", "Select a Species", shared_summary_counts, multiple = FALSE, ~common_name)
-
+```{js}
+# Set default values for crosstalk
+function filter_default(){
+  document.getElementById("species_code").getElementsByClassName("selectized")[0].selectize.setValue("NOCA",false) 
+}
+    
+$(document).ready(filter_default);
 ```
 
 ## Count Summaries
@@ -137,6 +135,7 @@ COUNT SUMMARY BY POINT & SURVEY
 
 Heat maps showing number of individuals detected per species by point and survey event. User selects park and species. This figure shows the data per point and survey event. Rows are points and columns are survey events, column facets are years. Note that colors are rescaled for each selection. Legend scale should be prominent, with summary of quartiles in title or subtitle.
 
+~TRY WITH PLOT_LY
 ```{r fig.height = 12}
 # Heat map
 
@@ -146,7 +145,8 @@ plot_ly(
   y= ~ location_name,
   z = ~ sum_indiv,
   color = ~sum_indiv,
-  fill = ~sum_indiv,
+  group = ~yr_visit,
+  text = ~hover_label,
   type = "heatmap"
 )
 
@@ -168,6 +168,9 @@ DETECTION SUMMARY BY POINT & SURVEY
 
 DETECTION VS. COVARIATES
 # Appendix of Interactive Graphs and Tables
+
+```{r}
+```
 
 ```{r}
 # Convert to shared data class to allow user selection. The 'group' argument allows both data frames to be selected with a single filter
