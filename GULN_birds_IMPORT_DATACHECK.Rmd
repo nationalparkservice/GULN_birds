@@ -61,12 +61,21 @@ options(
 ### Import and format data ----
 
 # Read in data and standardize column names
+
+df_veg <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_Veg_061522.csv")) %>%
+  janitor::clean_names("snake") %>%
+  dplyr::mutate(hab_type = case_when(
+    physiognomy %in% c("brush", "Deciduous Shrubland", "Evergreen Shrubland", "Shrublands", "grassland", "Fields and Croplands", "Forbland", "Introduced Grassland", "Marsh", "Mowed Lawn", "prairie", "Roads and Trails")  ~ "open",
+    physiognomy %in% c("Deciduous Forest", "Deciduous Woodland", "Woodland and Forest", "woodlands and Forest", "Woodlands and Forest") ~ "forest")
+  )
+
 df_locs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SampleLocations_2019-2021.csv")) %>%
-  janitor::clean_names("snake") # point lat-longs
+  janitor::clean_names("snake") %>%
+  dplyr::left_join(df_veg[c("location_name", "map_class", "physiognomy", "hab_type")], by = "location_name") # point lat-longs
 df_locs$unit_code[str_detect(df_locs$location_name, "GUISFL")] <- "GUIS-FL"
 df_locs$unit_code[str_detect(df_locs$location_name, "GUISMS")] <- "GUIS-MS"
 
-df_sitecovs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SiteConditions_2019-2021.csv")) %>%
+df_survey_conditions <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SiteConditions_2019-2021.csv")) %>%
   janitor::clean_names("snake") %>%
   dplyr::mutate(event_date = lubridate::mdy(date)) %>% # event covariate data--match using location_name and event_date
   dplyr::select(-date) %>%
@@ -90,6 +99,9 @@ df_species <- read_csv(here::here("Data_in", "Park_lists_2017.csv")) %>%
     species_code = x4_letter_code, 
     scientific_name = latin_name)
 
+# Only keep point locations that are actually surveyed
+df_locs %<>% dplyr::filter(location_name %in% unique(df_finaldat$location_name))
+
 # Count # of individuals detected per species-loc-survey ----
 # Need to add in zero-counts. This is the full observation data, including non-detection of species.
 yr_visit_template <- df_finaldat %>%
@@ -100,7 +112,7 @@ yr_visit_template <- df_finaldat %>%
 
 # For each unit, every combination of loc-survey event and bird species (ever found in that unit)
 count_template <- merge(
-  df_sitecovs %>% dplyr::select(site_name, unit_code, location_name, event_date, protocol) %>% dplyr::distinct() %>% dplyr::inner_join(df_finaldat %>% dplyr::select(location_name, event_date) %>% dplyr::distinct(), by = c("location_name", "event_date")), # the inner join ensures that we are working with the same date range of data from the two data files b/c sometimes the sitecovs data includes more recent survey events than included in the finaldat
+  df_survey_conditions %>% dplyr::select(site_name, unit_code, location_name, event_date, protocol) %>% dplyr::distinct() %>% dplyr::inner_join(df_finaldat %>% dplyr::select(location_name, event_date) %>% dplyr::distinct(), by = c("location_name", "event_date")), # the inner join ensures that we are working with the same date range of data from the two data files b/c sometimes the sitecovs data includes more recent survey events than included in the finaldat
   df_finaldat %>% dplyr::select(unit_code, species_code) %>% dplyr::distinct()) %>% # for each unit separately, all species found in each unit
   dplyr::left_join(df_species %>% dplyr::select(unit_code, species_code, scientific_name, common_name, landbird, park_breeding = present_in_np_species_classified_as_park_breeding), by = c("unit_code", "species_code")
 )
@@ -118,9 +130,10 @@ df_full_obs <- df_finaldat %>%
 df_full_obs$sum_indiv[is.na(df_full_obs$sum_indiv)] <- 0
 
 
+
 # # Save files ----
 saveRDS(df_locs, here::here("Data_out", "df_locs.RDS"))
-saveRDS(df_sitecovs, here::here("Data_out", "df_sitecovs.RDS"))
+saveRDS(df_survey_conditions, here::here("Data_out", "df_survey_conditions.RDS"))
 saveRDS(df_finaldat, here::here("Data_out", "df_finaldat.RDS"))
 saveRDS(df_species, here::here("Data_out", "df_species.RDS"))
 saveRDS(df_full_obs, here::here("Data_out", "df_full_obs.RDS"))
@@ -220,7 +233,7 @@ Please add the following survey events (with survey covariate information) to th
 
 ```{r}
 events_in_counts <- unique(df_finaldat[, c("unit_code", "location_name", "event_date")])
-events_in_conditions <- subset(df_sitecovs, select = c("location_name", "event_date"))
+events_in_conditions <- subset(df_survey_conditions, select = c("location_name", "event_date"))
 
 update_events <- anti_join(events_in_counts, events_in_conditions, by = c("location_name", "event_date")) %>% dplyr::arrange(unit_code, location_name, event_date)
 
@@ -303,7 +316,7 @@ if(nrow(incomplete_records) > 0) {
 
 ```{r}
 # Use crosstalk for this one, so maybe in EDA--to check survey dates? E.g., GUIS-MS has one site that was the only site on one survey day (possibly a mistype?)
-test <- subset(df_sitecovs, unit_code == "BITH")
+test <- subset(df_survey_conditions, unit_code == "BITH")
 ggplot(test, aes(x = factor(event_date), y = location_name, fill = weather_sky)) +
   geom_tile() +
   facet_row(vars(lubridate::year(event_date)), scale = "free")

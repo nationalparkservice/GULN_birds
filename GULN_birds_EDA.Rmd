@@ -77,12 +77,9 @@ with_tooltip <- function(value, tooltip) {
 
 ```{r}
 # Read in formatted data ----
-# df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
-# df_sitecovs <- readRDS(here::here("Data_out", "df_sitecovs.RDS")) # event covariate data 
+df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
+df_survey_conditions <- readRDS(here::here("Data_out", "df_survey_conditions.RDS")) # event covariate data
 df_full_obs <- readRDS(here::here("Data_out", "df_full_obs.RDS"))
-# df_species <- readRDS(here::here("Data_out", "df_species.RDS")) # cleaned point count data
-
-
 
     # dplyr::mutate(hover_label = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Code: ", species_code, "<br>Species Scientific Name: ", scientific_name, "<br>Species Common Name: ", common_name, "<br># Detected Indiv: ", sum_indiv)) 
 
@@ -321,7 +318,7 @@ shared_full_obs %>%
 
 Detections by point location and survey event.
 
-Black cells mean no survey event.
+Orange cells indicate no survey conducted.
 
 ```{r}
 
@@ -330,7 +327,7 @@ plot_ly(
   x= ~ yr_visit,
   y= ~ location_name,
   z = ~ sum_indiv,
-  height = 1400,
+  height = 1800,
   colors = "Blues",
   # reversescale = TRUE,
   # hoverinfo = 'text',
@@ -339,7 +336,10 @@ plot_ly(
   #                         "<br> z:", dat$z)),
   type = "heatmap"
 )%>% 
-  layout(title = list(text=unique(shared_full_obs$species_code), y = 1.05, x = 0.5, xanchor = 'center', yanchor =  'top'), plot_bgcolor = "black")
+  layout(
+    title = list(text=unique(shared_full_obs$species_code), y = 1.05, x = 0.5, xanchor = 'center', yanchor =  'top'), 
+    plot_bgcolor = "lightorange",
+    yaxis = list(autotick = F, tickvals = unique(shared_full_obs$location_name))) # <<<<<<<<<<< TITLE DOESN'T WORK
 
 ```
 
