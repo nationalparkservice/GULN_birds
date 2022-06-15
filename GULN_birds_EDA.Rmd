@@ -29,50 +29,116 @@ output:
     toc: yes
     toc_depth: 3
 ---
+```{css, echo=FALSE}
+
+body .main-container {
+      max-width: 100% !important;
+      width: 100% !important;
+    }
+    
+```
+    
 ```{r setup, include = FALSE}
 rm(list=ls())
 
-pkgs <- c("readr", "janitor", "tidyverse", "here", "magrittr", "data.table", "lubridate", "ggthemes", "gridExtra", "grid", "ggforce", "scales", "plotly", "knitr", "DT", "crosstalk", "echarts4r")
+pkgs <- c("tidyverse", "here", "magrittr", "lubridate", "gridExtra", "grid", "ggforce", "scales", "plotly", "knitr", "DT", "crosstalk", "reactable", "htmltools", "sparkline")
 installed_pkgs <- pkgs %in% installed.packages()
-if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
-lapply(pkgs, library, character.only = TRUE)
+if (length(pkgs[!installed_pkgs]) > 0)  install.packages(pkgs[!installed_pkgs],dep=TRUE)
+invisible(lapply(pkgs, library, character.only = TRUE))
 
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%", cache = FALSE, tidy = TRUE)
 ```
 
-```{r functions, include = FALSE}
+```{r functions}
+# Reactable bar chart function 
+bar_chart <- function(label, width = "100%", height = "14px", fill = "#00bfc4", background = NULL) {
+  bar <- div(style = list(background = fill, width = width, height = height))
+  chart <- div(style = list(flexGrow = 1, marginLeft = "6px", background = background), bar)
+  div(style = list(display = "flex", alignItems = "center"), label, chart)
+  }
 
-  
+# Reactable status badge formatting
+status_badge <- function(color = "#aaa", width = "9px", height = width) {
+  span(style = list(
+    display = "inline-block",
+    marginRight = "8px",
+    width = width,
+    height = height,
+    backgroundColor = color,
+    borderRadius = "50%"
+  ))
+}
+
+# Reactable tooltip formatting
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
 ```
 
 ```{r}
-# Read in formatted data
-df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
-df_sitecovs <- readRDS(here::here("Data_out", "df_sitecovs.RDS")) # event covariate data 
-df_finaldat <- readRDS(here::here("Data_out", "df_finaldat.RDS")) # cleaned point count data
+# Read in formatted data ----
+# df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
+# df_sitecovs <- readRDS(here::here("Data_out", "df_sitecovs.RDS")) # event covariate data 
+df_full_obs <- readRDS(here::here("Data_out", "df_full_obs.RDS"))
+# df_species <- readRDS(here::here("Data_out", "df_species.RDS")) # cleaned point count data
 
-# Count # of individuals detected per species-loc-survey. Need to add in zero's!
-template <- merge(
-  df_sitecovs %>% dplyr::select(location_name, event_date) %>% dplyr::distinct(),
-  sort(unique(df_finaldat$species_code)))
 
-test <- df_finaldat %>%
-  full_join(template, by = c("site_name", "unit_code", "location_name", ""))
 
-df_summary_counts <- df_finaldat %>%
-  dplyr::select(site_name, unit_code, location_name, protocol, yr, count, species_code, common_name, scientific_name, breeder, within_year_visit, event_date) %>%
-    dplyr::group_by(location_name, yr, event_date, species_code) %>%
-    dplyr::mutate(
-      sum_indiv = sum(count, na.rm = TRUE),
-      yr_visit = factor(paste0(yr, "_", within_year_visit))) %>%
-    dplyr::ungroup() %>%
-    dplyr::mutate(hover_label = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Code: ", species_code, "<br>Species Scientific Name: ", scientific_name, "<br>Species Common Name: ", common_name, "<br># Detected Indiv: ", sum_indiv)) %>%
-  dplyr::select(-count) %>%
-  dplyr::distinct() %>%
-  dplyr::arrange(location_name, yr, within_year_visit, species_code)
+    # dplyr::mutate(hover_label = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Code: ", species_code, "<br>Species Scientific Name: ", scientific_name, "<br>Species Common Name: ", common_name, "<br># Detected Indiv: ", sum_indiv)) 
 
-df_species_counts <- df_finaldat %>%
-  dplyr::
+# Summary by park ----
+# If the same number of locations is surveyed each yr_visit, this could be useful for getting a coarse sense of changes over time in the number of detected individuals per species, in each park unit
+df_summary_yr_visit <- df_full_obs %>%
+  dplyr::group_by(unit_code, species_code, yr_visit) %>%
+  dplyr::summarize(
+    yr_visit_detect = sum(sum_indiv, na.rm = TRUE),
+    perc_loc_detect = round(100*length(unique(location_name[sum_indiv>0]))/length(unique(location_name)))
+  ) %>% ungroup()
+
+calc_avg_yr_visit <- df_summary_yr_visit %>%
+  dplyr::group_by(unit_code, species_code) %>%
+  dplyr::summarize(
+    avg_yr_visit_detect = round(mean(yr_visit_detect, na.rm = TRUE), 2)
+  )
+
+species_sparkbar <- df_full_obs %>%
+  dplyr::mutate(yr = lubridate::year(event_date)) %>%
+  dplyr::group_by(unit_code, species_code, yr) %>%
+  dplyr::arrange(unit_code, species_code, yr) %>%
+  dplyr::summarize(
+    avg_surv_detect = round(mean(sum_indiv, na.rm = TRUE), 2)) %>%
+  dplyr::mutate(
+    spark_avg_yr = list(avg_surv_detect)) %>%
+  dplyr::select(unit_code, species_code, spark_avg_yr) %>%
+  distinct()
+  
+df_detail_species <- df_full_obs %>%
+  dplyr::group_by(unit_code, species_code) %>%
+  dplyr::summarize(
+    avg_surv_detect = round(mean(sum_indiv, na.rm = TRUE), 2),
+    n_locs = length(unique(location_name)), # this is the number of survey locations at a unit
+    perc_loc_detect = round(100*length(unique(location_name[sum_indiv>0]))/n_locs), # this is the % of survey locations at which the species was detected at least once (in any survey event),=
+    n_surv = n(), # number of survey events (survey event = 10-min point count at a location)
+    perc_surv_detect = round(100*sum(sum_indiv > 0)/n()) # this is the % of survey events in which the species was detected
+    ) %>% 
+  dplyr::ungroup() %>%
+  dplyr::full_join(calc_avg_yr_visit, by = c("unit_code", "species_code")) %>%
+  dplyr::left_join(species_sparkbar, by = c("unit_code", "species_code")) %>%
+  dplyr::select(unit_code, species_code, avg_surv_detect, spark_avg_yr, n_locs, perc_loc_detect, avg_yr_visit_detect, everything())
+
+# This is the master table by species  
+df_species <- df_full_obs %>%
+  dplyr::group_by(unit_code, species_code, scientific_name, common_name, landbird) %>%
+  dplyr::summarize(
+    avg_surv_detect = round(mean(sum_indiv, na.rm = TRUE), 2), # this is the average # of individuals detected per survey event (does not consider how many times a particular location surveyed)
+  ) %>%
+  dplyr::ungroup() %>%
+  tidyr::pivot_wider(names_from = unit_code, values_from = avg_surv_detect, names_prefix = "avg_") %>%
+  dplyr::mutate(across(starts_with("avg_"), ~ifelse(is.na(.x),0,.x))) %>%
+  dplyr::mutate(AVG_PARKS = round(rowMeans(.[grep("avg_", names(.))]), 2)) %>%
+  dplyr::arrange(desc(AVG_PARKS)) %>%
+  dplyr::select(species_code, scientific_name, common_name, landbird, AVG_PARKS, everything())
+  
 ```
 
 # Overview of Protocol and Data
@@ -89,7 +155,8 @@ All of a park’s points are visited within a four-day to two-week period, with 
 
 
 ```{r}
-# Table of number of points surveyed per park and year
+# Table of number of points surveyed per park and yr_visit
+
 ```
 
 ```{r}
@@ -104,66 +171,179 @@ An observer navigates to the point-count location by GPS, and over a 10-minute p
 
 ## Data Analysis
 
-# Exploratory Data Analysis - Summary by Species
+# Big Picture Summary of Species Detections
 
-For EDA, I used a subset of data that:
+## Point Count Detections by Species
 
-* 
+Table is sorted descending by average detections per survey, across parks (AVG OF 6 PARKS)).
 
-* 
+Detections are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY.
 
-* 
+```{r}
+# Colour map for conditional formatting
 
-## Species Summaries
-Table showing average detections/survey by species and year. Row is species (sorted highest total first) and column is year. Need to account for zeroes. 
+col_func <- function(x){
+  ifelse(!is.na(x),
+         rgb(colorRamp(c("#ffffff", "#f2fbd2", "#c9ecb4", "#93d3ab", "#35b0ab"))(x), maxColorValue = 255),
+         "#e9e9e9") #grey
+  }
 
-SELECT A SPECIES
+style_avg_detect <- function(value) {
+          color <- col_func(value/max(df_species[grep("avg_", names(df_species))], na.rm = T)) # normalize the values to color scale
+          list(background = color)
+          }
+
+reactable::reactable(df_species, 
+                     defaultColDef = colDef(
+                                     align = "center"
+                                     ),
+                     columns = list(
+                       species_code = colDef(name = "Species Code"),
+                       scientific_name = colDef(name = "Scientific Name"),
+                       common_name = colDef(name = "Common Name"),
+                       landbird = colDef(
+                         name = "Landbird?"),
+                       AVG_PARKS = colDef(header = with_tooltip("AVG OF 6 PARKS", "Average of park-specific averages, with equal weighting across parks (i.e., regardless of park size or number of point survey locations)"), style = style_avg_detect),
+                       avg_BITH = colDef(header = with_tooltip("BITH (N=32)", "Average # of individuals detected per point-survey at BITH"), style = style_avg_detect),
+                       `avg_GUIS-FL` = colDef(header = with_tooltip("GUIS-FL (N=13)", "Average # of individuals detected per point-survey at GUIS-FL"), style = style_avg_detect),
+                       `avg_GUIS-MS` = colDef(header = with_tooltip("GUIS-MS (N=8)", "Average # of individuals detected per point-survey at GUIS-MS"), style = style_avg_detect),
+                       avg_JELA = colDef(header = with_tooltip("JELA (N=32)", "Average # of individuals detected per point-survey at JELA"), style = style_avg_detect),
+                       avg_SAAN = colDef(header = with_tooltip("SAAN (N=33)", "Average # of individuals detected per point-survey at SAAN"), style = style_avg_detect),
+                       avg_VICK = colDef(header = with_tooltip("VICK (N=33)", "Average # of individuals detected per point-survey at VICK"), style = style_avg_detect)
+                     ),
+                     columnGroups = list(
+                       colGroup(name = "Average Detections per Survey (# of point locations)", columns = c("AVG_PARKS", "avg_BITH", "avg_GUIS-FL", "avg_GUIS-MS", "avg_JELA", "avg_SAAN", "avg_VICK"))
+                       ),
+                     compact = TRUE,
+                     bordered = TRUE, 
+                     resizable = TRUE, 
+                     striped = TRUE, 
+                     highlight = TRUE,
+                     filterable = TRUE, 
+                     defaultSortOrder = "desc",
+                     defaultSorted = "AVG_PARKS",
+                     showPageSizeOptions = TRUE,
+                     pageSizeOptions = c(15,30,50),
+                     defaultPageSize = 15,
+                     fullWidth = TRUE,
+                     width = "auto",
+                     details = function(index) {
+                       detail_species <- 
+                         df_detail_species[df_detail_species$species_code == df_species$species_code[index], ]
+                       htmltools::div(
+                         style = "padding: 20px",
+                         reactable(detail_species,
+                                   defaultColDef = colDef(
+                                     align = "center"
+                                     ),
+                                   columns = list(
+                                     unit_code = colDef(name = "Park Code"),
+                                     species_code = colDef(show = FALSE),
+                                     avg_surv_detect = colDef(header = with_tooltip("Detections/Survey", "Average # of individuals detected per point-survey"), maxWidth = 120, style = style_avg_detect),
+                                       spark_avg_yr = colDef(
+                                         header = with_tooltip("Detections Timeline", "Each point shows the average # of individuals detected per point-survey, by year"), cell = function(values) {
+    sparkline(values, type = "line")}),
+                                     n_locs = colDef(show = FALSE),
+                                     perc_loc_detect = colDef(
+                                       header = with_tooltip("%Locations Detected", "% of point survey locations at which species detected at least once"),
+                                       width = 150,
+                                       cell = function(value) {
+                                         width <- paste0(value, "%")
+                                         bar_chart(value, width = width, fill = "#fc5185", background = "#e1e1e1")
+                                         }),
+                                                                          avg_yr_visit_detect = colDef(
+                                       header = with_tooltip("Detections/Sample Round", "On average, the number of individuals detected in a single round of sampling, i.e., each point survey location visited once (values >= 20 are highlighted yellow"),
+                                       style = function(value) {
+                                         color <- if_else(value >= 20, "yellow", NULL)
+                                         list(background = color)
+                                         }),
+                                     n_surv = colDef(header = with_tooltip("# of Surveys", "# of point-surveys conducted"), maxWidth = 100),
+                                     perc_surv_detect = colDef(
+                                       header = with_tooltip("%Surveys Detected", "% of point-surveys in which species detected"),
+                                       width = 150,
+                                       cell = function(value) {
+                                         width <- paste0(value, "%")
+                                         bar_chart(value, width = width, fill = "#fc5185", background = "#e1e1e1")
+                                         })
+                                     ),
+                                   outlined = TRUE,
+                                   compact = TRUE,
+                                   resizable = TRUE,
+                                   defaultSortOrder = "desc",
+                                   defaultSorted = "avg_surv_detect")
+                       )
+                       }
+                     )
+
+```
+
+# Single Species Summaries
+
 ```{r}  
-shared_summary_counts <- SharedData$new(df_summary_counts, group = "species_code") 
-
-filter_select(id = "species_code", label = "Select a Species", sharedData = shared_summary_counts, multiple = FALSE, group = ~species_code)
-
+shared_full_obs <- SharedData$new(df_full_obs, ~species_code, group = "summary_counts_species") 
 ```
 
-```{js}
-# Set default values for crosstalk
-function filter_default(){
-  document.getElementById("species_code").getElementsByClassName("selectized")[0].selectize.setValue("NOCA",false) 
-}
-    
-$(document).ready(filter_default);
+```{r}
+filter_select(id = "summary_species", label = "Select a Species", sharedData = shared_full_obs, multiple = FALSE, group = ~species_code)
 ```
 
-## Count Summaries
+## Distribution of Detection Data
 
-COUNT SUMMARY BY PARK & SURVEY
+Detections are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY.
 
-Grouped horizontal box plots--each group is for a species, with one boxplot per year. Arranged with most common at top, calculated as highest average count. Metric is # of individuals per point-survey. User selects park
+Hover over a violin plot/boxplot to see summary values.
+```{r}
+shared_full_obs %>%
+  plot_ly(
+    x = ~unit_code,
+    y = ~sum_indiv,
+    type = 'violin',
+    box = list(
+      visible = T
+    ),
+    meanline = list(
+      visible = T
+    )
+  ) %>%
+  layout(
+    title = list(
+      title = ~unique(common_name)
+    ),
+    xaxis = list(
+      title = "Park Unit"
+    ),
+    yaxis = list(
+      title = "Detections per Survey",
+      zeroline = T
+    )
+  )
+```
+
+Detections by point location and survey event.
+
+Black cells mean no survey event.
 
 ```{r}
 
-```
-
-COUNT SUMMARY BY POINT & SURVEY
-
-Heat maps showing number of individuals detected per species by point and survey event. User selects park and species. This figure shows the data per point and survey event. Rows are points and columns are survey events, column facets are years. Note that colors are rescaled for each selection. Legend scale should be prominent, with summary of quartiles in title or subtitle.
-
-~TRY WITH PLOT_LY
-```{r fig.height = 12}
-# Heat map
-
 plot_ly(
-  shared_summary_counts,
+  shared_full_obs,
   x= ~ yr_visit,
   y= ~ location_name,
   z = ~ sum_indiv,
-  color = ~sum_indiv,
-  group = ~yr_visit,
-  text = ~hover_label,
+  height = 1400,
+  colors = "Blues",
+  # reversescale = TRUE,
+  # hoverinfo = 'text',
+  #           text = ~paste("Hour:", dat$x,
+  #                         "<br> Day:", dat$y,
+  #                         "<br> z:", dat$z)),
   type = "heatmap"
-)
+)%>% 
+  layout(title = list(text=unique(shared_full_obs$species_code), y = 1.05, x = 0.5, xanchor = 'center', yanchor =  'top'), plot_bgcolor = "black")
 
 ```
+
+
 
 COUNTS VS. COVARIATES
 
@@ -180,18 +360,15 @@ DETECTION SUMMARY BY POINT & SURVEY
 
 
 DETECTION VS. COVARIATES
+
+
+# Summary by Park Unit
+
+## Park Summary
+Table. Each row is a species. Cols are total detections, detections/survey, % point locations with a detection, % surveys with a detection. Then nested table shows results by survey round?
+
 # Appendix of Interactive Graphs and Tables
 
-```{r}
-```
-
-```{r}
-# Convert to shared data class to allow user selection. The 'group' argument allows both data frames to be selected with a single filter
-# shared_df_final <- SharedData$new(df_final, ~cave, group = "select_by_cave") 
-# shared_df_long <- SharedData$new(df_long, ~cave, group = "select_by_cave")
-# 
-# crosstalk::filter_select(id = "sel_cave", label = "Select a cave", sharedData = shared_df_final, multiple = FALSE, group = ~cave)
-```
 
 ```{r}
 
@@ -221,4 +398,10 @@ DETECTION VS. COVARIATES
 #       x = 0.5,
 #       y = 1.1)
 #     )
+```
+
+```{js}
+function filter_default(){
+  document.getElementById("summary_species").getElementsByClassName("selectized")[0].selectize.setValue("NOCA",false) 
+}$(document).ready(filter_default);
 ```

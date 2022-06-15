@@ -36,7 +36,25 @@ installed_pkgs <- pkgs %in% installed.packages()
 if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
 lapply(pkgs, library, character.only = TRUE)
 
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%", cache = FALSE, tidy = TRUE)
+knitr::opts_chunk$set(
+  echo = FALSE, 
+  warning = FALSE, 
+  message = FALSE, 
+  out.width = "100%", 
+  cache = FALSE, 
+  tidy = TRUE)
+
+options(
+  DT.options = list(
+      autoWidth = TRUE,
+      dom = 'Blfrtip',
+      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+      lengthMenu = list(c(10,30,50,-1),
+                        c(10,30,50,"All")),
+      pageLength = 10,
+      columnDefs = list(list(className = 'dt_center', targets = "_all"))
+    )
+)
 ```
 
 ```{r import_format}
@@ -45,11 +63,14 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width 
 # Read in data and standardize column names
 df_locs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SampleLocations_2019-2021.csv")) %>%
   janitor::clean_names("snake") # point lat-longs
+df_locs$unit_code[str_detect(df_locs$location_name, "GUISFL")] <- "GUIS-FL"
+df_locs$unit_code[str_detect(df_locs$location_name, "GUISMS")] <- "GUIS-MS"
 
 df_sitecovs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SiteConditions_2019-2021.csv")) %>%
   janitor::clean_names("snake") %>%
   dplyr::mutate(event_date = lubridate::mdy(date)) %>% # event covariate data--match using location_name and event_date
-  dplyr::select(-date)
+  dplyr::select(-date) %>%
+  dplyr::left_join(df_locs[, c("site_name", "unit_code", "location_name")], by = "location_name")
 
 df_finaldat <- read_csv(here::here("Data_in", "GULN_AllParks_BBirdObservations_Accepted_2019-2021.csv"),
                     col_types = cols(PointNotes = col_character(), 
@@ -57,7 +78,8 @@ df_finaldat <- read_csv(here::here("Data_in", "GULN_AllParks_BBirdObservations_A
   janitor::clean_names("snake") %>%
   dplyr::rename(yr = year, mnth = month) %>%
   dplyr::mutate(event_date = lubridate::mdy(date)) %>%
-  dplyr::select(-day, -date)
+  dplyr::select(-day, -date) %>%
+  dplyr::filter(!is.na(time_bin_id))
 df_finaldat$unit_code[str_detect(df_finaldat$location_name, "GUISFL")] <- "GUIS-FL"
 df_finaldat$unit_code[str_detect(df_finaldat$location_name, "GUISMS")] <- "GUIS-MS"
 
@@ -67,14 +89,44 @@ df_species <- read_csv(here::here("Data_in", "Park_lists_2017.csv")) %>%
     unit_code = park,
     species_code = x4_letter_code, 
     scientific_name = latin_name)
-# Fill in missing data
+
+# Count # of individuals detected per species-loc-survey ----
+# Need to add in zero-counts. This is the full observation data, including non-detection of species.
+yr_visit_template <- df_finaldat %>%
+  dplyr::select(location_name, event_date, yr, within_year_visit) %>%
+  dplyr::mutate(yr_visit = paste0(yr, "_", within_year_visit)) %>%
+  dplyr::select(-yr, -within_year_visit) %>%
+  dplyr::distinct()
+
+# For each unit, every combination of loc-survey event and bird species (ever found in that unit)
+count_template <- merge(
+  df_sitecovs %>% dplyr::select(site_name, unit_code, location_name, event_date, protocol) %>% dplyr::distinct() %>% dplyr::inner_join(df_finaldat %>% dplyr::select(location_name, event_date) %>% dplyr::distinct(), by = c("location_name", "event_date")), # the inner join ensures that we are working with the same date range of data from the two data files b/c sometimes the sitecovs data includes more recent survey events than included in the finaldat
+  df_finaldat %>% dplyr::select(unit_code, species_code) %>% dplyr::distinct()) %>% # for each unit separately, all species found in each unit
+  dplyr::left_join(df_species %>% dplyr::select(unit_code, species_code, scientific_name, common_name, landbird, park_breeding = present_in_np_species_classified_as_park_breeding), by = c("unit_code", "species_code")
+)
+
+# Number of indiv detected per species for each survey, including zeros filled in. This does not account for probability of detection--it is only number of individuals detected. For each park, includes all species ever detected during a point count in the park.
+df_full_obs <- df_finaldat %>%
+  dplyr::select(location_name, event_date, species_code, count) %>%
+    dplyr::group_by(location_name, event_date, species_code) %>%
+    dplyr::summarize(
+      sum_indiv = sum(count, na.rm = TRUE)) %>%
+    dplyr::ungroup() %>% 
+  dplyr::full_join(count_template) %>%
+  dplyr::inner_join(yr_visit_template, by = c("location_name", "event_date")) %>%
+  dplyr::arrange(location_name, event_date, species_code)
+df_full_obs$sum_indiv[is.na(df_full_obs$sum_indiv)] <- 0
 
 
-# Save files
-# saveRDS(df_locs, here::here("Data_out", "df_locs.RDS"))
-# saveRDS(df_sitecovs, here::here("Data_out", "df_sitecovs.RDS"))
-# saveRDS(df_finaldat, here::here("Data_out", "df_finaldat.RDS"))
-# saveRDS(df_species, here::here("Data_out", "df_species.RDS"))
+# # Save files ----
+saveRDS(df_locs, here::here("Data_out", "df_locs.RDS"))
+saveRDS(df_sitecovs, here::here("Data_out", "df_sitecovs.RDS"))
+saveRDS(df_finaldat, here::here("Data_out", "df_finaldat.RDS"))
+saveRDS(df_species, here::here("Data_out", "df_species.RDS"))
+saveRDS(df_full_obs, here::here("Data_out", "df_full_obs.RDS"))
+
+rm(df_locs)
+rm(df_full_obs)
 ```
 
 <span style="font-size:14px; color:blue; font-weight:bold;">
@@ -82,9 +134,38 @@ NOTE 1: In all files, GUIS location has been recoded to GUIS-FL or GUIS-MS.
 </span>
 
 <span style="font-size:14px; color:blue; font-weight:bold;">
-NOTE 2: Only the first 10 records are shown for each table. Use the Previous/Next or page number buttons under each table to see additional records. Table records can be filtered, sorted, and exported. To export ALL records, select `Show 'All' entries` before clicking an export button.
-
+NOTE 2: Excluding bird observation records with NA for time bin, because these observations occurred outside of the survey time.
 </span>
+
+<span style="font-size:14px; color:blue; font-weight:bold;">
+NOTE 2: Only the first 10 records are shown for each table. Use the Previous/Next or page number buttons under each table to see additional records. Table records can be filtered, sorted, and exported. To export ALL records, select `Show 'All' entries` before clicking an export button.
+</span>
+
+# Point count observations not classified to species level
+
+*These observations could not be identified to the species level.`*
+
+<span style="font-size:14px; color:red; font-weight:bold;">
+These data are classified to genus, not species. Decide how to treat these in analyses. Because the data cannot be classified to species, some species in these genera are undercounted.
+</span>
+
+```{r}
+unident_species <- df_finaldat[str_detect(string = df_finaldat$common_name, pattern = "Sp\\."), ] %>%
+  dplyr::select(unit_code, location_name, event_date, species_code, scientific_name, common_name, count) 
+
+if(nrow(unident_species) > 0) {
+  unident_species %>%
+    DT::datatable(
+      .,
+      class="compact stripe",
+      rownames= FALSE,
+      extensions = 'Buttons',
+      filter = 'top'
+      )
+  } else {
+    cat("All observations were classified to species level")
+    }
+```
 
 # Species that require update in Park Species List
 
@@ -105,16 +186,7 @@ if(nrow(update_species) > 0) {
     class="compact stripe",
     rownames= FALSE,
     extensions = 'Buttons',
-    filter = 'top', 
-    options = list(
-      autoWidth = TRUE,
-      dom = 'Blfrtip',
-      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
-      lengthMenu = list(c(10,30,50,-1),
-                        c(10,30,50,"All")),
-      pageLength = 10,
-      columnDefs = list(list(className = 'dt_center', targets = "_all"))
-    )
+    filter = 'top'
   )
 } else {
   cat("No point locations require update")
@@ -158,16 +230,7 @@ if(nrow(update_events) > 0) {
     class="compact stripe",
     rownames= FALSE,
     extensions = 'Buttons',
-    filter = 'top', 
-    options = list(
-      autoWidth = TRUE,
-      dom = 'Blfrtip',
-      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
-      lengthMenu = list(c(10,30,50,-1),
-                        c(10,30,50,"All")),
-      pageLength = 10,
-      columnDefs = list(list(className = 'dt_center', targets = "_all"))
-    )
+    filter = 'top'
   )
 } else {
   cat("No survey events require update")
@@ -194,16 +257,7 @@ if(nrow(fix_counts) > 0) {
     class="compact stripe",
     rownames= FALSE,
     extensions = 'Buttons',
-    filter = 'top', 
-    options = list(
-      autoWidth = TRUE,
-      dom = 'Blfrtip',
-      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
-      lengthMenu = list(c(10,30,50,-1),
-                        c(10,30,50,"All")),
-      pageLength = 10,
-      columnDefs = list(list(className = 'dt_center', targets = "_all"))
-    )
+    filter = 'top'
   )
 } else {
   cat("No observation records require update")
@@ -220,7 +274,7 @@ Please add the missing information in the following bird observation records, th
 
 ```{r}
 incomplete_records <- df_finaldat %>%
-  dplyr::select(location_name, event_date, species_code, time_bin_id, distance_bin_id, count, data_status) %>%
+  dplyr::select(location_name, event_date, species_code, distance_bin_id, count, data_status) %>%
   dplyr::filter(!complete.cases(.)) %>%
   dplyr::arrange(location_name, event_date, species_code)
 
@@ -231,18 +285,30 @@ if(nrow(incomplete_records) > 0) {
     class="compact stripe",
     rownames= FALSE,
     extensions = 'Buttons',
-    filter = 'top', 
-    options = list(
-      autoWidth = TRUE,
-      dom = 'Blfrtip',
-      buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
-      lengthMenu = list(c(10,30,50,-1),
-                        c(10,30,50,"All")),
-      pageLength = 10,
-      columnDefs = list(list(className = 'dt_center', targets = "_all"))
-    )
+    filter = 'top'
   )
 } else {
   cat("No observation records are missing important information")
 }
 ```
+
+# Duplicate records
+##### >>>>>>>>>>>>>>> IN EACH OF THE FOUR FILES, CHECK FOR DUPLICATE RECORDS
+
+# NON-NUMERIC ENTRIES
+##### >>>>>>>>>>>>>>> IN EACH OF THE FOUR FILES, CHECK FOR NON-NUMERIC ENTRIES IN FIELDS THAT SHOULD BE NUMERIC
+
+# SUMMARIES
+##### >>>>>>>>> FINAL DATA SUMMARIES--PERHAPS DATA MAID REPORTS?? (OR SOMETHING BETTER)
+
+```{r}
+# Use crosstalk for this one, so maybe in EDA--to check survey dates? E.g., GUIS-MS has one site that was the only site on one survey day (possibly a mistype?)
+test <- subset(df_sitecovs, unit_code == "BITH")
+ggplot(test, aes(x = factor(event_date), y = location_name, fill = weather_sky)) +
+  geom_tile() +
+  facet_row(vars(lubridate::year(event_date)), scale = "free")
+
+ggplot(test, aes(x = weather_sky)) + geom_col()
+
+```          
+          
