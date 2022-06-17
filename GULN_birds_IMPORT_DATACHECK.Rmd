@@ -61,13 +61,21 @@ options(
 ### Import and format data ----
 
 # Read in data and standardize column names
+# Important changes:
+# > recoded phys Woodland* and Forest* b/c multiple versions of same category
+# > recoded sky conditions so order is fog < drizzle < rain, instead of rain < fog < drizzle
+# > GUIS split out into GUIS-FL and GUIS-MS in all files
 
 df_veg <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_Veg_061522.csv")) %>%
   janitor::clean_names("snake") %>%
-  dplyr::mutate(hab_type = case_when(
-    physiognomy %in% c("brush", "Deciduous Shrubland", "Evergreen Shrubland", "Shrublands", "grassland", "Fields and Croplands", "Forbland", "Introduced Grassland", "Marsh", "Mowed Lawn", "prairie", "Roads and Trails")  ~ "open",
-    physiognomy %in% c("Deciduous Forest", "Deciduous Woodland", "Woodland and Forest", "woodlands and Forest", "Woodlands and Forest") ~ "forest")
-  )
+  dplyr::mutate(physiognomy = replace(physiognomy, grepl(pattern = "and Forest", .$physiognomy), "Woodlands and Forest")) %>% # there are 3 versions of this with different plural and caps, but it should be a single category
+  dplyr::mutate(
+    hab_type = case_when(
+      physiognomy %in% c("grassland", "Fields and Croplands", "Forbland", "Introduced Grassland", "Mowed Lawn", "prairie", "Roads and Trails")  ~ "open",
+      physiognomy %in% c("brush", "Deciduous Shrubland", "Evergreen Shrubland", "Shrublands") ~ "shrub",
+      physiognomy == "Marsh" ~ "marsh",
+      physiognomy %in% c("Deciduous Forest", "Deciduous Woodland", "Woodlands and Forest") ~ "forest")
+    )
 
 df_locs <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_SampleLocations_2019-2021.csv")) %>%
   janitor::clean_names("snake") %>%
@@ -79,7 +87,31 @@ df_survey_conditions <- read_csv(here::here("Data_in", "GULN_AllParks_BBird_Site
   janitor::clean_names("snake") %>%
   dplyr::mutate(event_date = lubridate::mdy(date)) %>% # event covariate data--match using location_name and event_date
   dplyr::select(-date) %>%
-  dplyr::left_join(df_locs[, c("site_name", "unit_code", "location_name")], by = "location_name")
+  dplyr::rename(
+    weather_noise_num = weather_background_noise,
+    weather_wind_num = weather_wind) %>%
+  dplyr::left_join(df_locs[, c("site_name", "unit_code", "location_name")], by = "location_name") %>%
+  dplyr::mutate(
+    weather_wind = case_when(
+      weather_wind_num == 0 ~ "0_calm",
+      weather_wind_num == 1 ~ "1_smoke_drifts",
+      weather_wind_num == 2 ~ "2_light_breeze",
+      weather_wind_num == 3 ~ "3_constant_breeze",
+      weather_wind_num == 4 ~ "4_branches_move",
+      weather_wind_num == 5 ~ "5_trees_sway",
+      weather_wind_num == 6 ~ "6_strong_wind"),
+    weather_sky = case_when( # I re-ordered these!
+      weather_sky == 0 ~ "0_clear",
+      weather_sky == 1 ~ "1_partly_cloudy",
+      weather_sky == 2 ~ "2_cloudy",
+      weather_sky == 3 ~ "5_rain",
+      weather_sky == 4 ~ "3_fog",
+      weather_sky == 5 ~ "4_drizzle"),
+    weather_noise = case_when(
+      weather_noise_num == 0 ~ "0_low",
+      weather_noise_num == 1 ~ "1_moderate", 
+      weather_noise_num == 2 ~ "2_high")
+  ) 
 
 df_finaldat <- read_csv(here::here("Data_in", "GULN_AllParks_BBirdObservations_Accepted_2019-2021.csv"),
                     col_types = cols(PointNotes = col_character(), 
@@ -107,7 +139,7 @@ df_locs %<>% dplyr::filter(location_name %in% unique(df_finaldat$location_name))
 yr_visit_template <- df_finaldat %>%
   dplyr::select(location_name, event_date, yr, within_year_visit) %>%
   dplyr::mutate(yr_visit = paste0(yr, "_", within_year_visit)) %>%
-  dplyr::select(-yr, -within_year_visit) %>%
+  dplyr::select(-within_year_visit) %>%
   dplyr::distinct()
 
 # For each unit, every combination of loc-survey event and bird species (ever found in that unit)
@@ -129,8 +161,6 @@ df_full_obs <- df_finaldat %>%
   dplyr::arrange(location_name, event_date, species_code)
 df_full_obs$sum_indiv[is.na(df_full_obs$sum_indiv)] <- 0
 
-
-
 # # Save files ----
 saveRDS(df_locs, here::here("Data_out", "df_locs.RDS"))
 saveRDS(df_survey_conditions, here::here("Data_out", "df_survey_conditions.RDS"))
@@ -139,7 +169,7 @@ saveRDS(df_species, here::here("Data_out", "df_species.RDS"))
 saveRDS(df_full_obs, here::here("Data_out", "df_full_obs.RDS"))
 
 rm(df_locs)
-rm(df_full_obs)
+rm(df_full_obs) # 5473272 bytes/ survey cond=130392 bytes; veg=36224 bytes
 ```
 
 <span style="font-size:14px; color:blue; font-weight:bold;">

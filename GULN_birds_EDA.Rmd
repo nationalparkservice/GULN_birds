@@ -41,7 +41,7 @@ body .main-container {
 ```{r setup, include = FALSE}
 rm(list=ls())
 
-pkgs <- c("tidyverse", "here", "magrittr", "lubridate", "gridExtra", "grid", "ggforce", "scales", "plotly", "knitr", "DT", "crosstalk", "reactable", "htmltools", "sparkline")
+pkgs <- c("tidyverse", "here", "magrittr", "lubridate", "scales", "plotly", "knitr", "crosstalk", "reactable", "htmltools", "sparkline", "sf")
 installed_pkgs <- pkgs %in% installed.packages()
 if (length(pkgs[!installed_pkgs]) > 0)  install.packages(pkgs[!installed_pkgs],dep=TRUE)
 invisible(lapply(pkgs, library, character.only = TRUE))
@@ -73,6 +73,18 @@ status_badge <- function(color = "#aaa", width = "9px", height = width) {
 with_tooltip <- function(value, tooltip) {
   tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
 }
+
+# Color scale for conditional formatting
+col_func <- function(x){
+  ifelse(!is.na(x),
+         rgb(colorRamp(c("#ffffff", "#f2fbd2", "#c9ecb4", "#93d3ab", "#35b0ab"))(x), maxColorValue = 255),
+         "#e9e9e9") #grey
+  }
+
+style_avg_detect <- function(value) {
+          color <- col_func(value/max(df_species[grep("avg_", names(df_species))], na.rm = T)) # normalize the values to color scale
+          list(background = color)
+          }
 ```
 
 ```{r}
@@ -83,7 +95,7 @@ df_full_obs <- readRDS(here::here("Data_out", "df_full_obs.RDS"))
 
     # dplyr::mutate(hover_label = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Code: ", species_code, "<br>Species Scientific Name: ", scientific_name, "<br>Species Common Name: ", common_name, "<br># Detected Indiv: ", sum_indiv)) 
 
-# Summary by park ----
+# Summary counts ----
 # If the same number of locations is surveyed each yr_visit, this could be useful for getting a coarse sense of changes over time in the number of detected individuals per species, in each park unit
 df_summary_yr_visit <- df_full_obs %>%
   dplyr::group_by(unit_code, species_code, yr_visit) %>%
@@ -99,7 +111,6 @@ calc_avg_yr_visit <- df_summary_yr_visit %>%
   )
 
 species_sparkbar <- df_full_obs %>%
-  dplyr::mutate(yr = lubridate::year(event_date)) %>%
   dplyr::group_by(unit_code, species_code, yr) %>%
   dplyr::arrange(unit_code, species_code, yr) %>%
   dplyr::summarize(
@@ -136,6 +147,7 @@ df_species <- df_full_obs %>%
   dplyr::arrange(desc(AVG_PARKS)) %>%
   dplyr::select(species_code, scientific_name, common_name, landbird, AVG_PARKS, everything())
   
+rm(df_summary_yr_visit); rm(calc_avg_yr_visit); rm(species_sparkbar)
 ```
 
 # Overview of Protocol and Data
@@ -150,16 +162,6 @@ The sampling frame excludes narrow buffers (25-50 meters) around park boundaries
 
 All of a park’s points are visited within a four-day to two-week period, with 3–8 points completed each day. All points are resampled within two and ten days after the initial sampling and must be conducted between dawn and 10:30 a.m.
 
-
-```{r}
-# Table of number of points surveyed per park and yr_visit
-
-```
-
-```{r}
-# Map of point count locations
-```
-
 ## Conducting Variable Circular Plot Point Counts
 
 An observer navigates to the point-count location by GPS, and over a 10-minute period, records the number of individuals seen or heard of each bird species. The observer also records the distance of each bird from the observer’s location and the minute the bird was first observed. Distances are recorded in bands of 0–25 meters (0–82 feet [ft]), 25–50 meters (82–164 ft), 50–100 meters (164–328 ft) and greater than 100 meters (328 ft). Once a bird is detected and recorded (), it is removed from further consideration, reducing the probability that any individual bird is counted twice. Each point is re-sampled within ten days of the initial sample.
@@ -170,26 +172,13 @@ An observer navigates to the point-count location by GPS, and over a 10-minute p
 
 # Big Picture Summary of Species Detections
 
-## Point Count Detections by Species
+## Point Count Detections by Species and Park
 
 Table is sorted descending by average detections per survey, across parks (AVG OF 6 PARKS)).
 
 Detections are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY.
 
 ```{r}
-# Colour map for conditional formatting
-
-col_func <- function(x){
-  ifelse(!is.na(x),
-         rgb(colorRamp(c("#ffffff", "#f2fbd2", "#c9ecb4", "#93d3ab", "#35b0ab"))(x), maxColorValue = 255),
-         "#e9e9e9") #grey
-  }
-
-style_avg_detect <- function(value) {
-          color <- col_func(value/max(df_species[grep("avg_", names(df_species))], na.rm = T)) # normalize the values to color scale
-          list(background = color)
-          }
-
 reactable::reactable(df_species, 
                      defaultColDef = colDef(
                                      align = "center"
