@@ -29,6 +29,13 @@ output:
     toc: yes
     toc_depth: 3
 ---
+```{r}
+# TO DO:
+# > Which plots are truly useful--maybe not the heat plots?
+# > Survey dates (julian prop.) for earlier years vs post-review. May need to restrict use of some 2010 data.
+# > Covariate plots... 
+```
+
 ```{css, echo=FALSE}
 
 body .main-container {
@@ -84,7 +91,76 @@ col_func <- function(x){
 style_avg_detect <- function(value) {
           color <- col_func(value/max(df_species[grep("avg_", names(df_species))], na.rm = T)) # normalize the values to color scale
           list(background = color)
-          }
+}
+
+# FuncDetectTable <- function(dat, colname, event_cov = TRUE) {
+#   dat %>% 
+#     dplyr::group_by(get(colname)) %>% 
+#     dplyr::summarize(
+#       num_locs = ifelse(event_cov, NA, length(unique(location_name))),
+#       num_surveys = n(),
+#       avg_detect = sum(sum_indiv)/num_surveys)
+# }
+
+FuncDetectPlot <- function(dat, colname) {
+  spec_code <- unique(dat$species_code)
+  dat %>%  
+  plot_ly(
+    x = as.formula(paste0('~', colname)),
+    y = ~sum_indiv,
+    type = "box",
+    boxpoints = "all",
+    boxmean = TRUE
+  ) %>%
+  layout(
+    title = list(
+      title = paste0(spec_code, " detections, by ", colname)
+    ),
+    yaxis = list(
+      title = "Detections per survey",
+      zeroline = T
+    )
+  )
+}
+
+group_map(~ plot_ly(data=., x = ~Sepal.Length, y = ~Sepal.Width, color = ~Species, type = "scatter", mode="markers"), keep=TRUE) %>%
+  subplot(nrows = 1, shareX = TRUE, shareY=TRUE)
+
+df_full_obs_cov %>%
+  dplyr::group_by(unit_code) %>%
+  group_map(~plot_ly(
+    data = .,
+    x = ~yr,
+    y = ~sum_indiv,
+    # color = ~yr_visit,
+    type = "box",
+    boxpoints = "all",
+    boxmean = TRUE
+  ),
+  keep = TRUE) %>%
+  subplot(nrows = length(unique(df_full_obs_cov$unit_code)), shareX = TRUE, shareY=FALSE)
+
+%>%
+  layout(
+    title = list(
+      title = paste0(spec_code, " detections, by year and NPS unit")
+    ),
+    yaxis = list(
+      title = "Detections per survey",
+      zeroline = T
+    )
+  ),
+
+# FuncDetectCorrPlot <- function(dat, colname) {
+#   spec_code <- unique(dat$species_code)
+#   
+#   ggplot(dat, aes_string(x = colname, y = "sum_indiv")) +
+#     geom_count() +
+#     scale_size_area() +
+#     geom_smooth() +
+#     labs(title = paste0(spec_code, " detections, by ", colname), y = "Detections", subtitle = "Point size is scaled to number of point count surveys.") +
+#     theme_bw(base_size = 12)
+# }
 ```
 
 ```{r}
@@ -95,9 +171,16 @@ df_full_obs <- readRDS(here::here("Data_out", "df_full_obs.RDS"))
 
     # dplyr::mutate(hover_label = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Code: ", species_code, "<br>Species Scientific Name: ", scientific_name, "<br>Species Common Name: ", common_name, "<br># Detected Indiv: ", sum_indiv)) 
 
+# Combine observation and covariate data ----
+df_full_obs_cov <- df_full_obs %>%
+  dplyr::left_join(df_locs[c("location_name", "physiognomy", "hab_type")], by = "location_name") %>%
+  dplyr::left_join(df_survey_conditions[c("location_name", "event_date", "julian_prop", "start_time_interval", "weather_wind", "weather_wind_num", "weather_temperature", "weather_temperature_cs", "weather_sky", "weather_sky_revised_num", "weather_noise", "weather_noise_num")], by = c("location_name", "event_date"))
+
+rm(df_full_obs)
+
 # Summary counts ----
 # If the same number of locations is surveyed each yr_visit, this could be useful for getting a coarse sense of changes over time in the number of detected individuals per species, in each park unit
-df_summary_yr_visit <- df_full_obs %>%
+df_summary_yr_visit <- df_full_obs_cov %>%
   dplyr::group_by(unit_code, species_code, yr_visit) %>%
   dplyr::summarize(
     yr_visit_detect = sum(sum_indiv, na.rm = TRUE),
@@ -110,7 +193,7 @@ calc_avg_yr_visit <- df_summary_yr_visit %>%
     avg_yr_visit_detect = round(mean(yr_visit_detect, na.rm = TRUE), 2)
   )
 
-species_sparkbar <- df_full_obs %>%
+species_sparkbar <- df_full_obs_cov %>%
   dplyr::group_by(unit_code, species_code, yr) %>%
   dplyr::arrange(unit_code, species_code, yr) %>%
   dplyr::summarize(
@@ -120,7 +203,7 @@ species_sparkbar <- df_full_obs %>%
   dplyr::select(unit_code, species_code, spark_avg_yr) %>%
   distinct()
   
-df_detail_species <- df_full_obs %>%
+df_detail_species <- df_full_obs_cov %>%
   dplyr::group_by(unit_code, species_code) %>%
   dplyr::summarize(
     avg_surv_detect = round(mean(sum_indiv, na.rm = TRUE), 2),
@@ -135,7 +218,7 @@ df_detail_species <- df_full_obs %>%
   dplyr::select(unit_code, species_code, avg_surv_detect, spark_avg_yr, n_locs, perc_loc_detect, avg_yr_visit_detect, everything())
 
 # This is the master table by species  
-df_species <- df_full_obs %>%
+df_species <- df_full_obs_cov %>%
   dplyr::group_by(unit_code, species_code, scientific_name, common_name, landbird) %>%
   dplyr::summarize(
     avg_surv_detect = round(mean(sum_indiv, na.rm = TRUE), 2), # this is the average # of individuals detected per survey event (does not consider how many times a particular location surveyed)
@@ -155,7 +238,7 @@ rm(df_summary_yr_visit); rm(calc_avg_yr_visit); rm(species_sparkbar)
 ## Monitoring Objective
 Document species richness and composition of breeding landbirds during annual visits to the parks and assess long-term trends in occupancy and the relative abundance or density for the most common  species.
 
-## Sites and Sampling Frequency
+## Sites and Sampling Frequency (post-2018 review))
 Point counts are conducted twice per breeding season (May - June) at at each of six parks within the Gulf Coast Network. Each park has 21 to 33 randomly selected, permanent point count locations, for a total of N = 179 point plots across the region.
 
 The sampling frame excludes narrow buffers (25-50 meters) around park boundaries, and points are required to be at least 200–250 meters apart. The smaller buffer sizes are used in situations where the original buffers and distances could not accommodate the full set of points within the sampling frame polygon. Points are distributed as a simple random draw from within park boundaries, rather than targeting specific habitats or areas. For three parks, the sampling frame was a buffered polygon around the whole park, allowing for park-wide inference. For the remaining three parks, the network selected one or more contiguous units of the park as the sampling frame, to prevent excessive travel time, or to accommodate safety or park management interest. In one case (Jean Lafitte NHP&P), the sampling frame was buffered corridors along trails and roads, due to challenges with access into flooded areas of the park. For all six parks, the points were drawn from the whole sampling frame, but if a point was on or within 50 meters (164 ft) of a road, parking lot, or building, the next available alternate point was used instead.
@@ -169,6 +252,50 @@ An observer navigates to the point-count location by GPS, and over a 10-minute p
 ## Covariate Data
 
 ## Data Analysis
+
+# Exploratory Data Analysis Criteria
+
+Note the following EDA criteria:
+
+<span style="font-size:14px; color:blue; font-weight:bold;">
+NOTE 1: These data exclude survey locations that were dropped after the 2018 protocol peer review.
+</span>
+
+<span style="font-size:14px; color:blue; font-weight:bold;">
+NOTE 2: These data exclude bird observation records with NA for time bin, because these observations occurred outside of the survey time.
+</span>
+
+<span style="font-size:14px; color:blue; font-weight:bold;">
+NOTE 3: These data exclude bird observation records with distance bin of 'Flyover', because these are not relevant for analyses.
+</span>
+ 
+# Summary of Sampling Distribution for Analyses
+
+Distribution of sample location habitat types across park units
+```{r}
+unique(df_full_obs_cov[c("unit_code", "location_name", "hab_type")]) %>% dplyr::select(unit_code, hab_type) %>% table() %>% knitr::kable()
+```
+
+Timing of surveys (Julian date) by park unit
+```{r}
+df_survey_conditions %>%
+  plot_ly(
+    x = ~unit_code,
+    y = ~julian_prop,
+    type = "box",
+    boxmean = TRUE,
+    boxpoints = "all"
+  ) %>%
+  layout(
+    xaxis = list(
+      title = "Park Unit"
+    ),
+    yaxis = list(
+      title = "Survey Date (as proportion of full year)",
+      zeroline = T
+    )
+  )
+```
 
 # Big Picture Summary of Species Detections
 
@@ -194,11 +321,12 @@ reactable::reactable(df_species,
                        `avg_GUIS-FL` = colDef(header = with_tooltip("GUIS-FL (N=13)", "Average # of individuals detected per point-survey at GUIS-FL"), style = style_avg_detect),
                        `avg_GUIS-MS` = colDef(header = with_tooltip("GUIS-MS (N=8)", "Average # of individuals detected per point-survey at GUIS-MS"), style = style_avg_detect),
                        avg_JELA = colDef(header = with_tooltip("JELA (N=32)", "Average # of individuals detected per point-survey at JELA"), style = style_avg_detect),
+                       avg_PAAL = colDef(header = with_tooltip("PAAL (N=29)", "Average # of individuals detected per point-survey at PAAL"), style = style_avg_detect),
                        avg_SAAN = colDef(header = with_tooltip("SAAN (N=33)", "Average # of individuals detected per point-survey at SAAN"), style = style_avg_detect),
-                       avg_VICK = colDef(header = with_tooltip("VICK (N=33)", "Average # of individuals detected per point-survey at VICK"), style = style_avg_detect)
+                       avg_VICK = colDef(header = with_tooltip("VICK (N=32)", "Average # of individuals detected per point-survey at VICK"), style = style_avg_detect)
                      ),
                      columnGroups = list(
-                       colGroup(name = "Average Detections per Survey (# of point locations)", columns = c("AVG_PARKS", "avg_BITH", "avg_GUIS-FL", "avg_GUIS-MS", "avg_JELA", "avg_SAAN", "avg_VICK"))
+                       colGroup(name = "Average Detections per Survey (# of point locations)", columns = c("AVG_PARKS", "avg_BITH", "avg_GUIS-FL", "avg_GUIS-MS", "avg_JELA", "avg_PAAL", "avg_SAAN", "avg_VICK"))
                        ),
                      compact = TRUE,
                      bordered = TRUE, 
@@ -266,7 +394,7 @@ reactable::reactable(df_species,
 # Single Species Summaries
 
 ```{r}  
-shared_full_obs <- SharedData$new(df_full_obs, ~species_code, group = "summary_counts_species") 
+shared_full_obs <- SharedData$new(df_full_obs_cov, ~species_code, group = "summary_counts_species") 
 ```
 
 ```{r}
@@ -283,13 +411,9 @@ shared_full_obs %>%
   plot_ly(
     x = ~unit_code,
     y = ~sum_indiv,
-    type = 'violin',
-    box = list(
-      visible = T
-    ),
-    meanline = list(
-      visible = T
-    )
+    type = "box",
+    boxpoints = "all",
+    boxmean = TRUE
   ) %>%
   layout(
     title = list(
@@ -306,29 +430,56 @@ shared_full_obs %>%
 ```
 
 Detections by point location and survey event.
+```{r}
+FuncDetectYrPlot(dat = shared_full_obs, colname = "unit_code")
+```
 
-Orange cells indicate no survey conducted.
+
+# Examine detection counts vs point location or event covariates
+```{r}
+# FuncDetectTable(dat = shared_full_obs, "physiognomy", event_cov = FALSE)
+FuncDetectPlot(dat = shared_full_obs, colname = "physiognomy")
+
+# FuncDetectTable(dat = shared_full_obs, "hab_type", event_cov = FALSE)
+FuncDetectPlot(dat = shared_full_obs, colname = "hab_type")
+
+# FuncDetectTable(dat = shared_full_obs, "weather_wind")
+FuncDetectPlot(dat = shared_full_obs, colname = "weather_wind")
+
+# FuncDetectTable(dat = shared_full_obs, "weather_sky")
+FuncDetectPlot(dat = shared_full_obs, colname = "weather_sky")
+
+# FuncDetectTable(dat = shared_full_obs, "weather_noise")
+FuncDetectPlot(dat = shared_full_obs, colname = "weather_noise")
+
+# FuncDetectTable(dat = shared_full_obs, "start_time_interval", event_cov = FALSE)
+# FuncDetectPlot(dat = shared_full_obs, colname = "start_time_interval")
+
+# FuncDetectCorrPlot(dat = shared_full_obs, colname = "julian_prop")
+
+# FuncDetectCorrPlot(dat = shared_full_obs, colname = "weather_temperature_cs")
+```
 
 ```{r}
 
-plot_ly(
-  shared_full_obs,
-  x= ~ yr_visit,
-  y= ~ location_name,
-  z = ~ sum_indiv,
-  height = 1800,
-  colors = "Blues",
-  # reversescale = TRUE,
-  # hoverinfo = 'text',
-  #           text = ~paste("Hour:", dat$x,
-  #                         "<br> Day:", dat$y,
-  #                         "<br> z:", dat$z)),
-  type = "heatmap"
-)%>% 
-  layout(
-    title = list(text=unique(shared_full_obs$species_code), y = 1.05, x = 0.5, xanchor = 'center', yanchor =  'top'), 
-    plot_bgcolor = "lightorange",
-    yaxis = list(autotick = F, tickvals = unique(shared_full_obs$location_name))) # <<<<<<<<<<< TITLE DOESN'T WORK
+# plot_ly(
+#   shared_full_obs,
+#   x= ~ yr_visit,
+#   y= ~ location_name,
+#   z = ~ sum_indiv,
+#   height = 1800,
+#   colors = "Blues",
+#   reversescale = TRUE,
+#   hoverinfo = 'text',
+#             text = ~paste("Hour:", dat$x,
+#                           "<br> Day:", dat$y,
+#                           "<br> z:", dat$z)),
+#   type = "heatmap"
+# )%>%
+#   layout(
+#     title = list(text=unique(shared_full_obs$species_code), y = 1.05, x = 0.5, xanchor = 'center', yanchor =  'top'),
+#     plot_bgcolor = "lightorange",
+#     yaxis = list(autotick = F, tickvals = unique(shared_full_obs$location_name))) # <<<<<<<<<<< TITLE DOESN'T WORK
 
 ```
 
@@ -391,6 +542,6 @@ Table. Each row is a species. Cols are total detections, detections/survey, % po
 
 ```{js}
 function filter_default(){
-  document.getElementById("summary_species").getElementsByClassName("selectized")[0].selectize.setValue("NOCA",false) 
+  document.getElementById("summary_species").getElementsByClassName("selectized")[0].selectize.setValue("NOCA",false)
 }$(document).ready(filter_default);
 ```
