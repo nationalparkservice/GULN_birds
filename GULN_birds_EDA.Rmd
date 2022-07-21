@@ -285,6 +285,10 @@ survey_wk_heatdat <- df_survey_conditions %>%
   dplyr::mutate_at(vars("has_survey"), ~replace_na(.,0)) %>%
   dplyr::mutate(hover_text = paste0("<span style='font-size:16px; font-weight:bold;'>", unit_code, "</span><br>Year: ", yr, "<br>Week: ", wk, "<br>Surveyed? ", ifelse(has_survey == 1, "YES", "NO")))
 
+# total height
+num_facet_rows <- ceiling(length(unique(survey_wk_heatdat$unit_code))/2) 
+total_page_ht <- 150 + 15 * length(min(survey_wk_heatdat$wk):max(survey_wk_heatdat$wk)) * num_facet_rows + 10 * num_facet_rows
+
 # subplot function
 subplot_wk <- . %>% plot_ly(
     x = ~wk,
@@ -292,7 +296,8 @@ subplot_wk <- . %>% plot_ly(
     z = ~has_survey,
     xgap = 1, # adds the white lines btwn heatmap cells
     ygap = 1,
-    colorscale = data.frame(z = c(0, 1), col = c("lightgray", "green")),
+    height = total_page_ht,
+    colorscale = data.frame(z = c(0, 1), col = c("lightgray", "black")),
     type = "heatmap",
     text = ~hover_text,
     hoverinfo ="text"
@@ -325,7 +330,7 @@ survey_wk_heatdat %>%
       nrows = ceiling(NROW(.)/2), 
       shareX = TRUE, 
       shareY = TRUE,
-      margin = c(0.01, 0.01, 0.04, 0.01), # this is the subplot margin, L R T B
+      margin = c(0.01, 0.01, 0.015, 0.01), # this is the subplot margin, L R T B
       which_layout = 1) %>%
   layout(
     title = "Survey weeks each year, by park unit (week 15 is mid-May; week 30 is July/Aug)",
@@ -337,6 +342,7 @@ survey_wk_heatdat %>%
 
 ## Years of sampling by location
 ```{r}
+# >>>>>>>>>>>>> I NEED TO SET THE COLORS CONSISTENT ACROSS SUBPLOTS
 survey_loc_heatdat <- df_survey_conditions %>% 
   dplyr::mutate(
     wk = lubridate::week(event_date),
@@ -344,9 +350,10 @@ survey_loc_heatdat <- df_survey_conditions %>%
   dplyr::group_by(unit_code, location_name, yr) %>%
   dplyr::summarize(
     median_wk = median(wk)) %>%
-  dplyr::full_join(., merge(unique(survey_loc_heatdat[c("unit_code", "location_name")]), data.frame(yr = min(survey_loc_heatdat$yr):max(survey_loc_heatdat$yr)))) %>%
+  dplyr::full_join(merge(unique(.[c("unit_code", "location_name")]), data.frame(yr = min(.$yr):max(.$yr)))) %>%
   dplyr::mutate(hover_text = paste0("<span style='font-size:16px; font-weight:bold;'>", unit_code, "</span><br>Year: ", yr, "<br>Location: ", location_name, "<br>Median Survey Week: ", median_wk)) %>%
   dplyr::arrange(unit_code, location_name, yr) 
+
 survey_loc_heatdat$hover_text[is.na(survey_loc_heatdat$median_wk)] <- NA
 
 # total height
@@ -357,6 +364,9 @@ loc_heights <-
   survey_loc_heatdat %>% dplyr::group_by(unit_code) %>% summarize(num_locs = n_distinct(location_name)) %>% dplyr::pull(num_locs)+10 
 rel_heights <- proportions(loc_heights)
 
+# set colorbar range
+vir_colors <- scales::viridis_pal(direction = -1)(max(survey_loc_heatdat$median_wk, na.rm = TRUE) - min(survey_loc_heatdat$median_wk, na.rm = TRUE) + 1)
+
 # subplot function
 subplot_loc <- . %>% plot_ly(
     x = ~yr,
@@ -366,7 +376,8 @@ subplot_loc <- . %>% plot_ly(
     ygap = 1,
     height = total_page_ht,
     # colorbar(orientation = "h"), # should be available in the next plot_ly package version
-    reversescale =T,
+    colors = vir_colors,
+    limits = c(min(survey_loc_heatdat$median_wk, na.rm = TRUE), max(survey_loc_heatdat$median_wk, na.rm = TRUE)),
     type = "heatmap",
     text = ~hover_text,
     hoverinfo ="text"
@@ -412,8 +423,7 @@ survey_loc_heatdat %>%
     title = "Years of survey, for each point count location (colors show median week of survey)",
     margin = list(l = 75, r = 20,
           b = 75, t = 75) # adds space to top and bottom of page
-) %>%
-  hide_colorbar(.)
+)
 ```
 
 # Big Picture Summary of Species Detections
@@ -527,29 +537,28 @@ Detections are the number of unique individuals detected during a point count, W
 
 Detections by point location and survey event.
 ```{r}
-shared_full_obs <- df_full_obs_cov %>% dplyr::select(unit_code, location_name, species_code, event_date, event_date, sum_indiv) %>% dplyr::filter(unit_code == "BITH" & species_code == "TUTI")
-# FuncYrBoxPlot(dat = shared_full_obs, facet_name = "unit_code")
-pkey <- plotly::highlight_key(shared_full_obs, ~location_name) # define a primary key variable for queries
-  
-  # create plot
-  p <- plot_ly(
-    pkey, 
-    x = ~event_date,
-    y = ~jitter(sum_indiv),
-    type = "scatter",
-    mode = "lines+markers",
-    group_by = ~location_name,
-    color = I("darkgray"),
-    text = ~paste("Location: ", location_name)
-  )
-  colors <- RColorBrewer::brewer.pal(6, "Dark2")
-  
-  p %>% 
-    layout(title = "Click a point to highlight that survey location; shift+click to highlight multiple locations") %>%
-    plotly::highlight(on = "plotly_click", color = colors, dynamic = TRUE)
-# }
-  
-FuncLineHighlight(dat = shared_full_obs, grouping_var = "location_name")
+FuncYrBoxPlot(dat = shared_full_obs, facet_name = "unit_code")
+```
+
+```{r}
+# pkey <- plotly::highlight_key(shared_full_obs, ~location_name) # define a primary key variable for queries
+#   
+#   # create plot
+#   p <- plot_ly(
+#     pkey, 
+#     x = ~event_date,
+#     y = ~jitter(sum_indiv),
+#     type = "scatter",
+#     mode = "lines+markers",
+#     group_by = ~location_name,
+#     color = I("darkgray"),
+#     text = ~paste("Location: ", location_name)
+#   )
+#   
+#   p %>% 
+#     layout(title = "Click a point to highlight that survey location; shift+click to highlight multiple locations") %>%
+#     plotly::highlight(on = "plotly_click")
+
 ```
 
 ```{r}
