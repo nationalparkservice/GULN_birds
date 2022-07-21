@@ -34,7 +34,7 @@ rm(list=ls())
 pkgs <- c("readr", "tidyverse", "here", "janitor", "magrittr", "lubridate", "data.table", "knitr", "DT")
 installed_pkgs <- pkgs %in% installed.packages()
 if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
-lapply(pkgs, library, character.only = TRUE)
+invisible(lapply(pkgs, library, character.only = TRUE))
 
 knitr::opts_chunk$set(
   echo = FALSE, 
@@ -69,11 +69,6 @@ locs_file <- "GULN_AllParks_BBird_SampleLocations_2019-2021.csv"
 conditions_file <- "GULN_AllParks_BBird_SiteConditions_2010-2021.csv"
 
 # Read in data and standardize column names
-# Important changes:
-# > recoded phys Woodland* and Forest* b/c multiple versions of same category
-# > recoded sky conditions so order is fog < drizzle < rain, instead of rain < fog < drizzle
-# > GUIS split out into GUIS-FL and GUIS-MS in all files
-
 df_active <- read_csv(here::here("Data_in", active_points_file)) %>%
   janitor::clean_names("snake")
 
@@ -151,7 +146,7 @@ df_survey_conditions <- read_csv(here::here("Data_in", conditions_file)) %>%
   dplyr::mutate(
     weather_temperature_cs = as.numeric(scale(weather_temperature)), # centered and scaled temp
     julian_prop = lubridate::yday(event_date)/365) %>% 
-  dplyr::right_join(df_initialdat[c("location_name", "event_date")] %>% distinct())
+  dplyr::inner_join(df_initialdat[c("location_name", "event_date")] %>% distinct())
 
 # Generate the final data for analyses ----
 # Count the number of individuals detected per species-loc-survey
@@ -341,7 +336,6 @@ If available, please add the missing covariate information to these records, the
 
 ```{r}
 missing_cov <- df_survey_conditions %>%
-  dplyr::filter(lubridate::year(event_date)>=2019) %>%
   dplyr::select(network, location_name, event_date, time, weather_wind_num, weather_temperature, weather_sky, weather_count_season, weather_noise_num) %>%
   dplyr::filter(!complete.cases(.))
 
