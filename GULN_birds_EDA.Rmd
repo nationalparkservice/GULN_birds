@@ -1,42 +1,57 @@
 ---
-title: "GULN birds - EDA of 2010-2021 data"
-author: Ellen Cheng
-date: "`r format(Sys.time(), '%d %B, %Y')`"
+title: "GULN birds - Exploratory Data Analysis"
 output:
-  html_document:
-    df_print: kable
-    fig_caption: yes
-    highlight: haddock
-    keep_md: yes
-    smart: no
-    theme: journal
-    number_sections: yes
-    toc: yes
-    toc_float: 
-      collapse: true
-    toc_depth: 3
-editor_options: 
-  chunk_output_type: console
+  flexdashboard::flex_dashboard:
+    theme: yeti
+    orientation: columns
+runtime: shiny
 ---
-
-```{css, echo=FALSE}
-
-body .main-container {
-      max-width: 100% !important;
-      width: 100% !important;
-    }
-    
-```
-    
-```{r setup, include = FALSE}
+```{r setup}
 rm(list=ls())
 
-pkgs <- c("tidyverse", "here", "magrittr", "lubridate", "scales", "plotly", "knitr", "crosstalk", "reactable", "htmltools", "sparkline", "sf", "kableExtra", "lemon")
+pkgs <- c("shiny", "knitr", "flexdashboard", "here", "tidyverse", "magrittr", "lubridate", "scales", "plotly","reactable", "htmltools", "sparkline")
 installed_pkgs <- pkgs %in% installed.packages()
 if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
 invisible(lapply(pkgs, library, character.only = TRUE))
 
-knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%", cache = FALSE, tidy = TRUE)
+rv <- reactiveValues(
+  dat = NULL,
+  locs = NULL,
+  covs = NULL) # clear everything
+```
+
+```{r css_and_html}
+# This expands maps to fill screen
+tags$style("map {
+           height: calc(100vh - 80px) !important;
+           }")
+
+# Add left and right margin padding on columns
+tags$style(".dashboard-column {
+    padding-left: 10px;
+    padding-right: 10px;
+}")
+
+tags$style(".reactable {
+font-size: 14px; 
+}") # font size for reactable tables
+
+# Reactable tooltip formatting
+with_tooltip <- function(value, tooltip) {
+  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
+}
+
+# # Reactable status badge formatting
+# status_badge <- function(color = "#aaa", width = "9px", height = width) {
+#   span(style = list(
+#     display = "inline-block",
+#     marginRight = "8px",
+#     width = width,
+#     height = height,
+#     backgroundColor = color,
+#     borderRadius = "50%"
+#   ))
+# }
 ```
 
 ```{r functions}
@@ -46,23 +61,6 @@ bar_chart <- function(label, width = "100%", height = "14px", fill = "#00bfc4", 
   chart <- div(style = list(flexGrow = 1, marginLeft = "6px", background = background), bar)
   div(style = list(display = "flex", alignItems = "center"), label, chart)
   }
-
-# Reactable status badge formatting
-status_badge <- function(color = "#aaa", width = "9px", height = width) {
-  span(style = list(
-    display = "inline-block",
-    marginRight = "8px",
-    width = width,
-    height = height,
-    backgroundColor = color,
-    borderRadius = "50%"
-  ))
-}
-
-# Reactable tooltip formatting
-with_tooltip <- function(value, tooltip) {
-  tags$abbr(style = "text-decoration: underline; text-decoration-style: dotted; cursor: help", title = tooltip, value)
-}
 
 # Color scale for conditional formatting
 col_func <- function(x){
@@ -76,82 +74,68 @@ style_avg_detect <- function(value) {
           list(background = color)
 }
 
-# FuncDetectTable <- function(dat, colname, event_cov = TRUE) {
-#   dat %>% 
-#     dplyr::group_by(get(colname)) %>% 
-#     dplyr::summarize(
-#       num_locs = ifelse(event_cov, NA, length(unique(location_name))),
-#       num_surveys = n(),
-#       avg_detect = sum(sum_indiv)/num_surveys)
-# }
+FuncYrBoxPlotly <- function(dat) {
+  # total height
+  num_facet_rows <- length(unique(dat$unit_code))
+  total_page_ht <- 150 + 150 * num_facet_rows + 10 * num_facet_rows
 
-# >>>> THIS ONE IS PRETTY GOOD
-FuncYrBoxPlot <- function(dat, facet_name) {
-  ggplot(dat, aes(x = as.factor(yr), y = sum_indiv)) + 
-    stat_summary(fun = "mean", geom = "line", color = "red", size = 1, aes(group = 1)) +
-    stat_summary(fun = "median", geom = "line", color = "blue", size = 1, aes(group = 1)) +
-    geom_boxplot(alpha = 0) +
-  geom_jitter(height = 0.2, width = 0.4, alpha = 0.25) +
-  labs(title = "BLAH BLAH BLAH", y = "Detections", subtitle = "Each (jittered) point represents a point count.\nRed line shows mean detections/survey; blue shows median.") +
-  theme_bw(base_size = 12) +
-  facet_wrap(vars(get(facet_name)))
-}
-
-FuncPlot <- function(dat, facet_name) {
-  spec_code <- unique(dat$species_code)
-  dat %>%  
-  plot_ly(
-    x = as.formula(paste0('~', colname)),
-    y = ~sum_indiv,
-    type = "box",
-    boxpoints = "all",
-    boxmean = TRUE
-  ) %>%
-  layout(
-    title = list(
-      title = paste0(spec_code, " detections, by ", colname)
-    ),
-    yaxis = list(
-      title = "Detections per survey",
-      zeroline = T
+  # subplot function
+  subplot_box <- . %>% 
+    plot_ly(height = total_page_ht) %>%
+    add_trace(x = ~yr, y = ~sum_indiv, type = "box", boxmean = TRUE, color = I("gray"), alpha = 0) %>%
+    add_markers(x = ~jitter(yr),  # this is better than boxpoints b/c boxpoints can't have hover info
+                y = ~jitter(sum_indiv),
+                color = I("lightblue"),
+                marker = list(size = 6),
+                text = ~hover_text, 
+                hoverinfo = "text") %>%
+    layout(
+      xaxis = list(
+        title = "Year"
+        ),
+      yaxis = list(
+        title = "Counts per survey",
+        zeroline = T
+      )
+    ) %>%
+  add_annotations(
+    text = ~unique(unit_code),
+    x = 0.5,
+    y = 1.02,
+    yref = "paper",
+    xref = "paper",
+    xanchor = "middle",
+    yanchor = "bottom",
+    showarrow = FALSE,
+    font = list(size = 15)
     )
-  )
+  
+  dat %>%
+    dplyr::group_by(unit_code) %>%
+    plotly::do(p = subplot_box(.)) %>%
+    subplot(
+      nrows = NROW(.), 
+      shareX = TRUE, 
+      shareY = TRUE,
+      titleX = TRUE,
+      margin = c(0.01, 0.01, 0.015, 0.01), # this is the subplot margin, L R T B
+      which_layout = 1) %>%
+    layout(
+      title = "Each (jittered) point is a point count",
+      margin = list(l = 75, r = 20,
+                    b = 75, t = 75) # adds space to top and bottom of page
+    ) %>%
+    hide_legend(.)
 }
+```
 
+```{r reactives}
+renderUI({
+  shiny::req(!is.null(df_full_obs_cov), !is.null(input$sel_park), !is.null(input$sel_species))
 
-# df_full_obs_cov %>%
-#   dplyr::group_by(unit_code) %>%
-#   group_map(~plot_ly(
-#     data = .,
-#     x = ~yr,
-#     y = ~sum_indiv,
-#     # color = ~yr_visit,
-#     type = "box",
-#     boxpoints = "all",
-#     boxmean = TRUE
-#   ),
-#   keep = TRUE) %>%
-#   subplot(nrows = length(unique(df_full_obs_cov$unit_code)), shareX = TRUE, shareY=FALSE) %>%
-#   layout(
-#     title = list(
-#       title = paste0(spec_code, " detections, by year and NPS unit")
-#     ),
-#     yaxis = list(
-#       title = "Detections per survey",
-#       zeroline = T
-#     )
-#   )
-
-# FuncDetectCorrPlot <- function(dat, colname) {
-#   spec_code <- unique(dat$species_code)
-#   
-#   ggplot(dat, aes_string(x = colname, y = "sum_indiv")) +
-#     geom_count() +
-#     scale_size_area() +
-#     geom_smooth() +
-#     labs(title = paste0(spec_code, " detections, by ", colname), y = "Detections", subtitle = "Point size is scaled to number of point count surveys.") +
-#     theme_bw(base_size = 12)
-# }
+  rv$dat <- df_full_obs_cov %>%
+    dplyr::filter(unit_code %in% input$sel_park & common_name %in% input$sel_species)
+})
 ```
 
 ```{r}
@@ -161,21 +145,18 @@ FuncPlot <- function(dat, facet_name) {
 # > recoded phys Woodland* and Forest* b/c multiple versions of same category
 # > recoded sky conditions so order is fog < drizzle < rain, instead of rain < fog < drizzle
 
+
 df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
 df_survey_conditions <- readRDS(here::here("Data_out", "df_survey_conditions.RDS")) # event covariate data
 df_full_obs <- readRDS(here::here("Data_out", "df_full_obs.RDS"))
 
-    # dplyr::mutate(hover_label = paste("NPS Unit: ", site_name, "<br>Unit Code: ", unit_code, "<br>Location Code: ", location_name, "<br>Year: ", yr, "<br>W/in Year Visit#: ", within_year_visit, "<br>Event Date: ", event_date, "<br>Species Code: ", species_code, "<br>Species Scientific Name: ", scientific_name, "<br>Species Common Name: ", common_name, "<br># Detected Indiv: ", sum_indiv)) 
-
 # Combine observation and covariate data ----
 df_full_obs_cov <- df_full_obs %>%
   dplyr::left_join(df_locs[c("location_name", "physiognomy", "hab_type")], by = "location_name") %>%
-  dplyr::left_join(df_survey_conditions[c("location_name", "event_date", "julian_prop", "start_time_interval", "weather_wind", "weather_wind_num", "weather_temperature", "weather_temperature_cs", "weather_sky", "weather_sky_revised_num", "weather_noise", "weather_noise_num")], by = c("location_name", "event_date"))
-
-rm(df_full_obs)
+  dplyr::left_join(df_survey_conditions[c("location_name", "event_date", "julian_prop", "start_time_interval", "weather_wind", "weather_wind_num", "weather_temperature", "weather_sky", "weather_sky_revised_num", "weather_noise", "weather_noise_num")], by = c("location_name", "event_date")) %>%
+  dplyr::mutate(hover_text = paste0("<span style='font-size:16px; font-weight:bold;'>", unit_code, "<br>", paste0(scientific_name, " / ", common_name, " (", species_code, ")"), "</span><br>Location: ", location_name, "<br>Habitat Type: ", hab_type, "<br>Survey Date: ", event_date, "<br># of Individuals: ", sum_indiv))
 
 # Summary counts ----
-# If the same number of locations is surveyed each yr_visit, this could be useful for getting a coarse sense of changes over time in the number of detected individuals per species, in each park unit
 df_summary_yr_visit <- df_full_obs_cov %>%
   dplyr::group_by(unit_code, species_code, yr_visit) %>%
   dplyr::summarize(
@@ -226,55 +207,33 @@ df_species <- df_full_obs_cov %>%
   dplyr::arrange(desc(AVG_PARKS)) %>%
   dplyr::select(species_code, scientific_name, common_name, landbird, AVG_PARKS, everything())
   
-rm(df_summary_yr_visit); rm(calc_avg_yr_visit); rm(species_sparkbar)
+rm(df_full_obs); rm(df_summary_yr_visit); rm(calc_avg_yr_visit); rm(species_sparkbar)
+
+
 ```
-
-# Overview of Protocol and Data
-
-## Monitoring Objective
-Document species richness and composition of breeding landbirds during annual visits to the parks and assess long-term trends in occupancy and the relative abundance or density for the most common  species.
-
-## Sites and Sampling Frequency (post-2018 review))
-Point counts are conducted twice per breeding season (May - June) at at each of six parks within the Gulf Coast Network. Each park has 21 to 33 randomly selected, permanent point count locations, for a total of N = 179 point plots across the region.
-
-The sampling frame excludes narrow buffers (25-50 meters) around park boundaries, and points are required to be at least 200–250 meters apart. The smaller buffer sizes are used in situations where the original buffers and distances could not accommodate the full set of points within the sampling frame polygon. Points are distributed as a simple random draw from within park boundaries, rather than targeting specific habitats or areas. For three parks, the sampling frame was a buffered polygon around the whole park, allowing for park-wide inference. For the remaining three parks, the network selected one or more contiguous units of the park as the sampling frame, to prevent excessive travel time, or to accommodate safety or park management interest. In one case (Jean Lafitte NHP&P), the sampling frame was buffered corridors along trails and roads, due to challenges with access into flooded areas of the park. For all six parks, the points were drawn from the whole sampling frame, but if a point was on or within 50 meters (164 ft) of a road, parking lot, or building, the next available alternate point was used instead.
-
-All of a park’s points are visited within a four-day to two-week period, with 3–8 points completed each day. All points are resampled within two and ten days after the initial sampling and must be conducted between dawn and 10:30 a.m.
-
-## Conducting Variable Circular Plot Point Counts
-
-An observer navigates to the point-count location by GPS, and over a 10-minute period, records the number of individuals seen or heard of each bird species. The observer also records the distance of each bird from the observer’s location and the minute the bird was first observed. Distances are recorded in bands of 0–25 meters (0–82 feet [ft]), 25–50 meters (82–164 ft), 50–100 meters (164–328 ft) and greater than 100 meters (328 ft). Once a bird is detected and recorded (), it is removed from further consideration, reducing the probability that any individual bird is counted twice. Each point is re-sampled within ten days of the initial sample.
-
-## Covariate Data
-
-## Data Analysis
-
-# Exploratory Data Analysis Criteria
-
-Note the following EDA criteria:
-
-<span style="font-size:14px; color:blue; font-weight:bold;">
-NOTE 1: These data exclude survey locations that were dropped after the 2018 protocol peer review.
-</span>
-
-<span style="font-size:14px; color:blue; font-weight:bold;">
-NOTE 2: These data exclude bird observation records with NA for time bin, because these observations occurred outside of the survey time.
-</span>
-
-<span style="font-size:14px; color:blue; font-weight:bold;">
-NOTE 3: These data exclude bird observation records with distance bin of 'Flyover', because these are not relevant for analyses.
-</span>
  
-# Summary of Sampling Distribution for Analyses
+Big Picture Summary of Sampling Effort
+=========================================
 
-## Distribution of sample location habitat types across park units
+Column {data-width=1}
+-------------------------------------
+
+Column {data-width=30}
+-------------------------------------
+### Distribution of sample location habitat types across park units
 ```{r}
 unique(df_full_obs_cov[c("unit_code", "location_name", "hab_type")]) %>% dplyr::select(unit_code, hab_type) %>% table() %>% knitr::kable(.) %>% kableExtra::kable_styling(., bootstrap_options = "striped", position = "center", full_width = F)
 ```
 
-## Weekly timing of surveys
+### Summary of missed locations
+
+Column {data-width=60}
+-------------------------------------
+### Weekly timing of surveys
 ```{r}
-survey_wk_heatdat <- df_survey_conditions %>% 
+renderPlotly({
+  shiny::req(!is.null(df_survey_conditions))
+  survey_wk_heatdat <- df_survey_conditions %>% 
   dplyr::mutate(
     wk = lubridate::week(event_date),
     yr = lubridate::year(event_date)) %>%
@@ -287,7 +246,7 @@ survey_wk_heatdat <- df_survey_conditions %>%
 
 # total height
 num_facet_rows <- ceiling(length(unique(survey_wk_heatdat$unit_code))/2) 
-total_page_ht <- 150 + 15 * length(min(survey_wk_heatdat$wk):max(survey_wk_heatdat$wk)) * num_facet_rows + 10 * num_facet_rows
+total_page_ht <- 150 + 12 * length(min(survey_wk_heatdat$wk):max(survey_wk_heatdat$wk)) * num_facet_rows + 10 * num_facet_rows
 
 # subplot function
 subplot_wk <- . %>% plot_ly(
@@ -338,46 +297,195 @@ survey_wk_heatdat %>%
           b = 75, t = 75) # adds space to top and bottom of page
 ) %>%
   hide_colorbar(.)
+})
+
 ```
 
-## Years of sampling by location
-```{r}
-# >>>>>>>>>>>>> I NEED TO SET THE COLORS CONSISTENT ACROSS SUBPLOTS
-survey_loc_heatdat <- df_survey_conditions %>% 
-  dplyr::mutate(
-    wk = lubridate::week(event_date),
-    yr = lubridate::year(event_date)) %>%
-  dplyr::group_by(unit_code, location_name, yr) %>%
-  dplyr::summarize(
-    median_wk = median(wk)) %>%
-  dplyr::full_join(merge(unique(.[c("unit_code", "location_name")]), data.frame(yr = min(.$yr):max(.$yr)))) %>%
-  dplyr::mutate(hover_text = paste0("<span style='font-size:16px; font-weight:bold;'>", unit_code, "</span><br>Year: ", yr, "<br>Location: ", location_name, "<br>Median Survey Week: ", median_wk)) %>%
-  dplyr::arrange(unit_code, location_name, yr) 
+Big Picture Summary of Species Detections
+=========================================
 
-survey_loc_heatdat$hover_text[is.na(survey_loc_heatdat$median_wk)] <- NA
+#### <font size="3">**Add instructions here**</font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+```{r}
+reactable::reactable(df_species,
+                     defaultColDef = colDef(
+                                     align = "center"
+                                     ),
+                     columns = list(
+                       species_code = colDef(name = "Species Code"),
+                       scientific_name = colDef(name = "Scientific Name"),
+                       common_name = colDef(name = "Common Name"),
+                       landbird = colDef(
+                         name = "Landbird?"),
+                       AVG_PARKS = colDef(header = with_tooltip("AVG OF 6 PARKS", "Average of park-specific averages, with equal weighting across parks (i.e., regardless of park size or number of point survey locations)"), style = style_avg_detect),
+                       avg_BITH = colDef(header = with_tooltip("BITH (N=32)", "Average # of individuals detected per point-survey at BITH"), style = style_avg_detect),
+                       `avg_GUIS-FL` = colDef(header = with_tooltip("GUIS-FL (N=13)", "Average # of individuals detected per point-survey at GUIS-FL"), style = style_avg_detect),
+                       `avg_GUIS-MS` = colDef(header = with_tooltip("GUIS-MS (N=8)", "Average # of individuals detected per point-survey at GUIS-MS"), style = style_avg_detect),
+                       avg_JELA = colDef(header = with_tooltip("JELA (N=32)", "Average # of individuals detected per point-survey at JELA"), style = style_avg_detect),
+                       avg_PAAL = colDef(header = with_tooltip("PAAL (N=29)", "Average # of individuals detected per point-survey at PAAL"), style = style_avg_detect),
+                       avg_SAAN = colDef(header = with_tooltip("SAAN (N=33)", "Average # of individuals detected per point-survey at SAAN"), style = style_avg_detect),
+                       avg_VICK = colDef(header = with_tooltip("VICK (N=32)", "Average # of individuals detected per point-survey at VICK"), style = style_avg_detect)
+                     ),
+                     columnGroups = list(
+                       colGroup(name = "Average Detections per Survey (# of point locations)", columns = c("AVG_PARKS", "avg_BITH", "avg_GUIS-FL", "avg_GUIS-MS", "avg_JELA", "avg_PAAL", "avg_SAAN", "avg_VICK"))
+                       ),
+                     compact = TRUE,
+                     bordered = TRUE,
+                     resizable = TRUE,
+                     striped = TRUE,
+                     highlight = TRUE,
+                     filterable = TRUE,
+                     defaultSortOrder = "desc",
+                     defaultSorted = "AVG_PARKS",
+                     showPageSizeOptions = TRUE,
+                     pageSizeOptions = c(15,30,50),
+                     defaultPageSize = 15,
+                     fullWidth = TRUE,
+                     width = "auto",
+                     details = function(index) {
+                       detail_species <-
+                         df_detail_species[df_detail_species$species_code == df_species$species_code[index], ]
+                       htmltools::div(
+                         style = "padding: 20px",
+                         reactable(detail_species,
+                                   defaultColDef = colDef(
+                                     align = "center"
+                                     ),
+                                   columns = list(
+                                     unit_code = colDef(name = "Park Code"),
+                                     species_code = colDef(show = FALSE),
+                                     avg_surv_detect = colDef(header = with_tooltip("Detections/Survey", "Average # of individuals detected per point-survey"), maxWidth = 120, style = style_avg_detect),
+                                       spark_avg_yr = colDef(
+                                         header = with_tooltip("Detections Timeline", "Each point shows the average # of individuals detected per point-survey, by year"), cell = function(values) {
+    sparkline(values, type = "line")}),
+                                     n_locs = colDef(show = FALSE),
+                                     perc_loc_detect = colDef(
+                                       header = with_tooltip("%Locations Detected", "% of point survey locations at which species detected at least once"),
+                                       width = 150,
+                                       cell = function(value) {
+                                         width <- paste0(value, "%")
+                                         bar_chart(value, width = width, fill = "#fc5185", background = "#e1e1e1")
+                                         }),
+                                                                          avg_yr_visit_detect = colDef(
+                                       header = with_tooltip("Detections/Sample Round", "On average, the number of individuals detected in a single round of sampling, i.e., each point survey location visited once (values >= 20 are highlighted yellow"),
+                                       style = function(value) {
+                                         color <- if_else(value >= 20, "yellow", NULL)
+                                         list(background = color)
+                                         }),
+                                     n_surv = colDef(header = with_tooltip("# of Surveys", "# of point-surveys conducted"), maxWidth = 100),
+                                     perc_surv_detect = colDef(
+                                       header = with_tooltip("%Surveys Detected", "% of point-surveys in which species detected"),
+                                       width = 150,
+                                       cell = function(value) {
+                                         width <- paste0(value, "%")
+                                         bar_chart(value, width = width, fill = "#fc5185", background = "#e1e1e1")
+                                         })
+                                     ),
+                                   outlined = TRUE,
+                                   compact = TRUE,
+                                   resizable = TRUE,
+                                   defaultSortOrder = "desc",
+                                   defaultSorted = "avg_surv_detect")
+                       )
+                       }
+                     )
+
+```
+
+Drill-Down by Park and Species
+=========================================
+
+Inputs {.sidebar data-width=250}
+-------------------------------------
+```{r input} 
+renderUI({
+  shiny::req(!is.null(df_full_obs_cov))
+  checkboxGroupInput("sel_park",
+                     label = h6("Select Park(s): "),
+                     choices = sort(unique(df_full_obs_cov$unit_code)),
+                     selected = switch(is.null(input$sel_park)+1, input$sel_park, unique(df_full_obs_cov$unit_code))
+                     )
+  })
+
+renderUI({
+  shiny::req(!is.null(df_full_obs_cov))
+  selectInput(
+    "sel_species",
+    label = strong("Select a Species: "),
+    choices = sort(unique(df_full_obs_cov$common_name)),
+    selected = switch(is.null(input$sel_species)+1, input$sel_species, "Northern Cardinal")
+    )
+  })
+```
+
+Tabs {.tabset .tabset-fade}
+-------------------------------------
+
+### Attempt at Brushing
+
+Counts are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY.
+
+```{r}
+renderPlotly({
+  shiny::req(!is.null(rv$dat))
+  FuncYrBoxPlotly(dat = rv$dat)
+})
+```
+
+### Heatmap
+
+#### <font size="3">**Add instructions here**</font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+```{r}
+renderPlotly({
+  shiny::req(!is.null(rv$dat), !is.null(input$sel_species), !is.null(input$sel_park))
 
 # total height
-total_page_ht <- 150 + 15 * length(unique(survey_loc_heatdat$location_name)) + 10 * length(unique(survey_loc_heatdat$unit_code))
+total_page_ht <- 150 + 15 * length(unique(rv$dat$location_name)) + 10 * length(unique(rv$dat$unit_code))
 
 # relative heights
 loc_heights <-
-  survey_loc_heatdat %>% dplyr::group_by(unit_code) %>% summarize(num_locs = n_distinct(location_name)) %>% dplyr::pull(num_locs)+10 
+  rv$dat %>% dplyr::group_by(unit_code) %>% summarize(num_locs = n_distinct(location_name)) %>% dplyr::pull(num_locs)+10 
 rel_heights <- proportions(loc_heights)
 
-# set colorbar range
-vir_colors <- scales::viridis_pal(direction = -1)(max(survey_loc_heatdat$median_wk, na.rm = TRUE) - min(survey_loc_heatdat$median_wk, na.rm = TRUE) + 1)
+# create discrete colorbar
+max_count <- max(rv$dat$sum_indiv, na.rm = TRUE)
+vir_colors <- c("#D3D3D3", scales::viridis_pal(direction = -1)(max_count)) # first one is light gray, which is assigned to count = 0
+names(vir_colors) = 0:max_count
+
+Z_Breaks = function(n){ # make the color table
+CUTS = seq(0,1,length.out=n+1)
+rep(CUTS,ifelse(CUTS %in% 0:1,1,2))
+}
+
+color_table <- data.frame(z=Z_Breaks(length(vir_colors)),
+col=rep(vir_colors,each=2),stringsAsFactors=FALSE)
 
 # subplot function
-subplot_loc <- . %>% plot_ly(
-    x = ~yr,
+subplot_counts <- . %>% plot_ly(
+    x = ~yr_visit,
     y = ~location_name,
-    z = ~median_wk,
+    z = ~sum_indiv,
     xgap = 1, # adds the white lines btwn heatmap cells
     ygap = 1,
     height = total_page_ht,
     # colorbar(orientation = "h"), # should be available in the next plot_ly package version
-    colors = vir_colors,
-    limits = c(min(survey_loc_heatdat$median_wk, na.rm = TRUE), max(survey_loc_heatdat$median_wk, na.rm = TRUE)),
+    colorscale = color_table,
+    colorbar=list(title = "# of Indiv.", tickmode = "array", tickvals = 0:max_count, ticktext = names(vir_colors)),
+    zmin = 0, 
+    zmax = max_count, # finally figured how to set the colorbar limits
     type = "heatmap",
     text = ~hover_text,
     hoverinfo ="text"
@@ -389,7 +497,7 @@ subplot_loc <- . %>% plot_ly(
       tickprefix = "  " # hack for increasing space between y-axis title and tick labels
     ),
     xaxis = list(
-      title = "Year",
+      title = "Survey Round (Year-Visit)",
       tickfont = list(size=10)
       )) %>%
   add_annotations(
@@ -405,9 +513,9 @@ subplot_loc <- . %>% plot_ly(
     )
 
 # subplot view
-survey_loc_heatdat %>%
+rv$dat %>%
   dplyr::group_by(unit_code) %>%
-  plotly::do(p = subplot_loc(.)) %>%
+  plotly::do(p = subplot_counts(.)) %>%
   subplot(
       nrows = NROW(.),
       shareX = FALSE,
@@ -415,209 +523,14 @@ survey_loc_heatdat %>%
       titleX = FALSE,
       titleY = TRUE,
       heights = rel_heights,
-      margin = c(0, 0, 0.015, 0.01),
-      # heights = proportions(0.12 + rel_heights), # The 0.12 is sum of top and bottom margins
-      # margin = c(0.08, 0.03, 0.04, 0.04), # this is the subplot margin, L R T B
+      margin = c(0, 0, 0.04, 0.01), # this is the subplot margin, L R T B
       which_layout = 1) %>%
   layout(
-    title = "Years of survey, for each point count location (colors show median week of survey)",
+    title = "Counts by location and survey event (not corrected for detection probability)",
     margin = list(l = 75, r = 20,
           b = 75, t = 75) # adds space to top and bottom of page
-)
-```
+  ) %>%
+  hide_colorbar(.)
 
-# Big Picture Summary of Species Detections
-
-## Point Count Detections by Species and Park
-
-Table is sorted descending by average detections per survey, across parks (AVG OF 6 PARKS)).
-
-Detections are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY.
-
-```{r}
-# reactable::reactable(df_species, 
-#                      defaultColDef = colDef(
-#                                      align = "center"
-#                                      ),
-#                      columns = list(
-#                        species_code = colDef(name = "Species Code"),
-#                        scientific_name = colDef(name = "Scientific Name"),
-#                        common_name = colDef(name = "Common Name"),
-#                        landbird = colDef(
-#                          name = "Landbird?"),
-#                        AVG_PARKS = colDef(header = with_tooltip("AVG OF 6 PARKS", "Average of park-specific averages, with equal weighting across parks (i.e., regardless of park size or number of point survey locations)"), style = style_avg_detect),
-#                        avg_BITH = colDef(header = with_tooltip("BITH (N=32)", "Average # of individuals detected per point-survey at BITH"), style = style_avg_detect),
-#                        `avg_GUIS-FL` = colDef(header = with_tooltip("GUIS-FL (N=13)", "Average # of individuals detected per point-survey at GUIS-FL"), style = style_avg_detect),
-#                        `avg_GUIS-MS` = colDef(header = with_tooltip("GUIS-MS (N=8)", "Average # of individuals detected per point-survey at GUIS-MS"), style = style_avg_detect),
-#                        avg_JELA = colDef(header = with_tooltip("JELA (N=32)", "Average # of individuals detected per point-survey at JELA"), style = style_avg_detect),
-#                        avg_PAAL = colDef(header = with_tooltip("PAAL (N=29)", "Average # of individuals detected per point-survey at PAAL"), style = style_avg_detect),
-#                        avg_SAAN = colDef(header = with_tooltip("SAAN (N=33)", "Average # of individuals detected per point-survey at SAAN"), style = style_avg_detect),
-#                        avg_VICK = colDef(header = with_tooltip("VICK (N=32)", "Average # of individuals detected per point-survey at VICK"), style = style_avg_detect)
-#                      ),
-#                      columnGroups = list(
-#                        colGroup(name = "Average Detections per Survey (# of point locations)", columns = c("AVG_PARKS", "avg_BITH", "avg_GUIS-FL", "avg_GUIS-MS", "avg_JELA", "avg_PAAL", "avg_SAAN", "avg_VICK"))
-#                        ),
-#                      compact = TRUE,
-#                      bordered = TRUE, 
-#                      resizable = TRUE, 
-#                      striped = TRUE, 
-#                      highlight = TRUE,
-#                      filterable = TRUE, 
-#                      defaultSortOrder = "desc",
-#                      defaultSorted = "AVG_PARKS",
-#                      showPageSizeOptions = TRUE,
-#                      pageSizeOptions = c(15,30,50),
-#                      defaultPageSize = 15,
-#                      fullWidth = TRUE,
-#                      width = "auto",
-#                      details = function(index) {
-#                        detail_species <- 
-#                          df_detail_species[df_detail_species$species_code == df_species$species_code[index], ]
-#                        htmltools::div(
-#                          style = "padding: 20px",
-#                          reactable(detail_species,
-#                                    defaultColDef = colDef(
-#                                      align = "center"
-#                                      ),
-#                                    columns = list(
-#                                      unit_code = colDef(name = "Park Code"),
-#                                      species_code = colDef(show = FALSE),
-#                                      avg_surv_detect = colDef(header = with_tooltip("Detections/Survey", "Average # of individuals detected per point-survey"), maxWidth = 120, style = style_avg_detect),
-#                                        spark_avg_yr = colDef(
-#                                          header = with_tooltip("Detections Timeline", "Each point shows the average # of individuals detected per point-survey, by year"), cell = function(values) {
-#     sparkline(values, type = "line")}),
-#                                      n_locs = colDef(show = FALSE),
-#                                      perc_loc_detect = colDef(
-#                                        header = with_tooltip("%Locations Detected", "% of point survey locations at which species detected at least once"),
-#                                        width = 150,
-#                                        cell = function(value) {
-#                                          width <- paste0(value, "%")
-#                                          bar_chart(value, width = width, fill = "#fc5185", background = "#e1e1e1")
-#                                          }),
-#                                                                           avg_yr_visit_detect = colDef(
-#                                        header = with_tooltip("Detections/Sample Round", "On average, the number of individuals detected in a single round of sampling, i.e., each point survey location visited once (values >= 20 are highlighted yellow"),
-#                                        style = function(value) {
-#                                          color <- if_else(value >= 20, "yellow", NULL)
-#                                          list(background = color)
-#                                          }),
-#                                      n_surv = colDef(header = with_tooltip("# of Surveys", "# of point-surveys conducted"), maxWidth = 100),
-#                                      perc_surv_detect = colDef(
-#                                        header = with_tooltip("%Surveys Detected", "% of point-surveys in which species detected"),
-#                                        width = 150,
-#                                        cell = function(value) {
-#                                          width <- paste0(value, "%")
-#                                          bar_chart(value, width = width, fill = "#fc5185", background = "#e1e1e1")
-#                                          })
-#                                      ),
-#                                    outlined = TRUE,
-#                                    compact = TRUE,
-#                                    resizable = TRUE,
-#                                    defaultSortOrder = "desc",
-#                                    defaultSorted = "avg_surv_detect")
-#                        )
-#                        }
-#                      )
-
-```
-
-# Single Species Summaries
-
-```{r}  
-shared_full_obs <- SharedData$new(df_full_obs_cov, ~species_code, group = "summary_counts_species") 
-```
-
-```{r}
-filter_select(id = "summary_counts_species", label = "Select a Species", sharedData = shared_full_obs, multiple = FALSE, group = ~species_code)
-```
-
-## Distribution of Detection Data
-
-Detections are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY.
-
-
-Detections by point location and survey event.
-```{r}
-FuncYrBoxPlot(dat = shared_full_obs, facet_name = "unit_code")
-```
-
-```{r}
-# pkey <- plotly::highlight_key(shared_full_obs, ~location_name) # define a primary key variable for queries
-#   
-#   # create plot
-#   p <- plot_ly(
-#     pkey, 
-#     x = ~event_date,
-#     y = ~jitter(sum_indiv),
-#     type = "scatter",
-#     mode = "lines+markers",
-#     group_by = ~location_name,
-#     color = I("darkgray"),
-#     text = ~paste("Location: ", location_name)
-#   )
-#   
-#   p %>% 
-#     layout(title = "Click a point to highlight that survey location; shift+click to highlight multiple locations") %>%
-#     plotly::highlight(on = "plotly_click")
-
-```
-
-```{r}
-# ADD HISTOGRAMS!
-```
-
-# Examine detection counts vs point location or event covariates
-# >>>>>>>>>>> HAB TYPE SHOULD BE FACETED BY FOREST, MARSH, OPEN, SHRUB
-# >>>>>>>>>>> NOISE RELATIONSHIP IS OPPOSITE WHAT I WOULD EXPECT FOR CARW
-```{r}
-# FuncDetectTable(dat = shared_full_obs, "physiognomy", event_cov = FALSE)
-# FuncDetectPlot(dat = shared_full_obs, colname = "physiognomy")
-
-# FuncDetectTable(dat = shared_full_obs, "hab_type", event_cov = FALSE)
-# FuncDetectPlot(dat = shared_full_obs, colname = "hab_type")
-
-# FuncDetectTable(dat = shared_full_obs, "weather_wind")
-# FuncDetectPlot(dat = shared_full_obs, colname = "weather_wind")
-
-# FuncDetectTable(dat = shared_full_obs, "weather_sky")
-# FuncDetectPlot(dat = shared_full_obs, colname = "weather_sky")
-
-# FuncDetectTable(dat = shared_full_obs, "weather_noise")
-# FuncDetectPlot(dat = shared_full_obs, colname = "weather_noise")
-
-# FuncDetectTable(dat = shared_full_obs, "start_time_interval", event_cov = FALSE)
-# FuncDetectPlot(dat = shared_full_obs, colname = "start_time_interval")
-
-# FuncDetectCorrPlot(dat = shared_full_obs, colname = "julian_prop")
-
-# FuncDetectCorrPlot(dat = shared_full_obs, colname = "weather_temperature_cs")
-```
-
-
-
-COUNTS VS. COVARIATES
-
-## Detection Times and Distances 
-
-DETECTION SUMMARY BY PARK
-Histogram of detection distance - all data. Grouped by Park (and/or by habitat type). Width of histogram bars should be scaled.
-
-Histogram of time-to-detection - all data. Grouped by Park (and/or by habitat type)
-
-DETECTION SUMMARY BY POINT & SURVEY
-## Drill-Down on Detection Times and Distances
-
-
-
-DETECTION VS. COVARIATES
-
-
-# Summary by Park Unit
-
-## Park Summary
-Table. Each row is a species. Cols are total detections, detections/survey, % point locations with a detection, % surveys with a detection. Then nested table shows results by survey round?
-
-```{js}
-function filter_default(){
-  document.getElementById("summary_counts_species").getElementsByClassName("selectized")[0].selectize.setValue("NOCA",false)
-}$(document).ready(filter_default);
+})
 ```
