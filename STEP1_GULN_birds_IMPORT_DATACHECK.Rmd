@@ -14,19 +14,7 @@ output:
     toc_float: 
       collapse: true
     toc_depth: 3
-  html_notebook:
-    chunk_output_type: inline
-  word_document:
-    toc: yes
-    toc_depth: 3
-  pdf_document:
-    df_print: kable
-    highlight: haddock
-    fig_caption: yes
-    keep_tex: yes
-    number_sections: yes
-    toc: yes
-    toc_depth: 3
+
 ---
 ```{r setup, include = FALSE}
 rm(list=ls())
@@ -70,7 +58,8 @@ conditions_file <- "GULN_AllParks_BBird_SiteConditions_2010-2021.csv"
 
 # Read in data and standardize column names
 df_active <- read_csv(here::here("Data_in", active_points_file)) %>%
-  janitor::clean_names("snake")
+  janitor::clean_names("snake") %>%
+  dplyr::mutate(unit_code = recode(unit_code, 'VICKS' = 'VICK', 'JELA_BA' = 'JELA', 'GUIS_FL' = 'GUIS-FL', 'GUIS_MS' = 'GUIS-MS', 'BITH_TC' = 'BITH'))
 
 df_initialdat <- read_csv(here::here("Data_in", counts_file),
                     col_types = cols(PointNotes = col_character(), 
@@ -224,6 +213,40 @@ Note that the raw data have been modified/subset in the following ways for the d
 <br>
 <br>
 Only the first 10 records are shown for each table. Use the Previous/Next or page number buttons under each table to see additional records. Table records can be filtered, sorted, and exported. To export ALL records, select `Show 'All' entries` before clicking an export button.
+
+# Missing survey events (since 2019)
+
+* These active monitoring points have fewer than 2 surveys in a year (only checking point count data from 2019 to current year)
+
+<span style="font-size:14px; color:red; font-weight:bold;">
+Please update the Active Monitoring Points file (if the locations are not  active) or add the point count data for these survey events (if available), then re-import the updated active monitoring points and bird observation files.
+</span>
+
+```{r}
+loc_freq <- 
+  df_initialdat %>%
+  dplyr::filter(yr >= 2019) %>%
+  dplyr::distinct(unit_code, location_name, yr, event_date) %>%
+  dplyr::count(unit_code, location_name, yr, name = "num_surveys")
+
+missing_dat <- merge(df_active[c("unit_code", "location_name")], data.frame(yr = 2019:max(df_initialdat$yr, na.rm = TRUE))) %>%
+  dplyr::left_join(loc_freq) %>%
+  dplyr::mutate(num_surveys = replace_na(num_surveys, 0)) %>%
+  dplyr::filter(num_surveys < 2) %>%
+  dplyr::arrange(desc(yr), unit_code, location_name)
+
+if(nrow(missing_dat) > 0) {
+  missing_dat %>% DT::datatable(
+    ., 
+    class="compact stripe",
+    rownames= FALSE,
+    extensions = 'Buttons',
+    filter = 'top'
+  )
+} else {
+  cat("No missing survey events")
+}
+```
 
 # Species codes that are missing from the Park Species List for a park unit
 

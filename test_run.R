@@ -236,16 +236,16 @@ unique(tt_raw[c("distance_bin", "distance_bin_id")])
 # Plot of actual distribution
 ggplot(tt_raw, aes(x= distance_bin_id, weight = count)) + geom_bar() # lower detections in closest distance bin BUT this may be appropriate, considering that the closest bins have smaller area. See QPAD book.
 
-# Does it differ by habitat type?
+# Does it differ by habitat type? YES, KEEP 
 ggplot(tt_raw, aes(x= distance_bin_id, weight = count)) + geom_bar() + facet_grid(cols = vars(hab_type)) # the more open the habitat, the less likely birds detected at closer distance classes (but sample sizes are small)
 
-# Does it differ by time interval?
+# Does it differ by time interval? YES, KEEP
 ggplot(tt_raw, aes(x= distance_bin_id, weight = count)) + geom_bar() + facet_grid(cols = vars(time_bin)) # it seems that the later time periods, observers more likely to record the birds from farther distance classes (perhaps the first birds they detect/record tend to be the ones closer in, then as those are "removed" they detect the ones farther out?)
 
 
 # ASSUMPTION: Exponential distribution for time since first detection
 
-# Plot of actual distribution
+# Plot of actual distribution YES, KEEP
 ggplot(tt_raw, aes(x= time_bin_id, weight = count)) + geom_bar()
 # it's really not exponential, perhaps b/c as time goes on it's hard to keep track of which birds have already been counted and also some birds may come into the survey area (immigration, a violation of closure assumption)
 

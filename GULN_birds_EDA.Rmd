@@ -9,7 +9,22 @@ runtime: shiny
 ```{r setup}
 rm(list=ls())
 
-pkgs <- c("shiny", "knitr", "flexdashboard", "here", "tidyverse", "magrittr", "lubridate", "scales", "plotly","reactable", "htmltools", "sparkline")
+pkgs <- c(
+  "shiny", 
+  "knitr", 
+  "flexdashboard", 
+  "here", 
+  "tidyverse", 
+  "magrittr", 
+  "lubridate", 
+  "scales", 
+  "patchwork",
+  "plotly",
+  "reactable", 
+  "htmltools", 
+  "sparkline",
+  "partykit" # classification tree
+)
 installed_pkgs <- pkgs %in% installed.packages()
 if (length(pkgs[!installed_pkgs]) > 0) install.packages(pkgs[!installed_pkgs],dep=TRUE) 
 invisible(lapply(pkgs, library, character.only = TRUE))
@@ -55,6 +70,163 @@ with_tooltip <- function(value, tooltip) {
 ```
 
 ```{r functions}
+
+FuncYrBoxPlotly <- function(dat, freeY) {
+  
+  # total height
+  num_facet_rows <- length(unique(dat$unit_code))
+  total_page_ht <- 150 + 250 * num_facet_rows + 10 * num_facet_rows
+  
+  # subplot function
+  subplot_box <- . %>% 
+    dplyr::mutate(fit = fitted(loess(sum_indiv ~ yr))) %>%
+    plot_ly(height = total_page_ht) %>%
+    add_trace(x = ~yr, y = ~sum_indiv, type = "box", boxmean = TRUE, color = I("black"), alpha = 0) %>%
+    add_markers(x = ~jitter(yr),  # this is better than boxpoints b/c boxpoints can't have hover info
+                y = ~jitter(sum_indiv),
+                color = I("lightblue"),
+                marker = list(size = 7, opacity = 0.7),
+                text = ~hover_text, 
+                hoverinfo = "text") %>%
+    add_lines(x  = ~yr, y = ~fit, color = I("red")) %>%
+    layout(
+      xaxis = list(
+        title = "Year",
+        tickmode = "array",
+        ticktext = min(dat$yr, na.rm = TRUE):max(dat$yr, na.rm = TRUE),
+        tickvals = min(dat$yr, na.rm = TRUE):max(dat$yr, na.rm = TRUE),
+        range = c(min(dat$yr, na.rm = TRUE)-1, max(dat$yr, na.rm = TRUE)+1),
+        showspikes = TRUE,
+        spikemode  = "across", # draw line across plots and to x-axis
+        spikedash = "solid",
+        spikecolor = "gray",
+        spikesnap = "data",
+        spikethickness = 2
+        ),
+      yaxis = list(
+        title = "Counts per survey",
+        range = c(0, max(dat$sum_indiv, na.rm = TRUE)+1),
+        autorange = ifelse(freeY, TRUE, FALSE),
+        zeroline = T
+      )
+    ) %>%
+  add_annotations(
+    text = ~unique(unit_code), # subplot title
+    x = 0.5,
+    y = 1.02,
+    yref = "paper",
+    xref = "paper",
+    xanchor = "middle",
+    yanchor = "bottom",
+    showarrow = FALSE,
+    font = list(size = 15)
+    )
+  
+  dat %>%
+    dplyr::group_by(unit_code) %>%
+    plotly::do(p = subplot_box(.)) %>%
+    subplot(
+      nrows = NROW(.), 
+      shareX = FALSE,
+      shareY = ifelse(freeY, FALSE, TRUE),
+      titleX = FALSE,
+      titleY = TRUE,
+      margin = c(0.05, 0.05, 0.01, 0.04), # this is the subplot margin, L R T B
+      which_layout = 1) %>%
+    layout(
+      title = paste0("Counts per survey for ", unique(dat$species_codename), " (each jittered point is a survey)"),
+      margin = list(l = 75, r = 20,
+                    b = 75, t = 75) # adds space to top and bottom of page
+    ) %>%
+    hide_legend(.)
+}
+
+FuncHeatCountPlotly <- function(dat) {
+  # total height
+total_page_ht <- 150 + 15 * length(unique(rv$dat$location_name)) + 10 * length(unique(rv$dat$unit_code))
+
+# relative heights
+loc_heights <-
+  rv$dat %>% dplyr::group_by(unit_code) %>% summarize(num_locs = n_distinct(location_name)) %>% dplyr::pull(num_locs)+10 
+rel_heights <- proportions(loc_heights)
+
+# create discrete colorbar
+max_count <- max(rv$dat$sum_indiv, na.rm = TRUE)
+vir_colors <- c("#D3D3D3", scales::viridis_pal(direction = -1)(max_count)) # first one is light gray, which is assigned to count = 0
+names(vir_colors) = 0:max_count
+
+Z_Breaks = function(n){ # make the color table
+CUTS = seq(0,1,length.out=n+1)
+rep(CUTS,ifelse(CUTS %in% 0:1,1,2))
+}
+
+color_table <- data.frame(z=Z_Breaks(length(vir_colors)),
+col=rep(vir_colors,each=2),stringsAsFactors=FALSE)
+
+# subplot function
+subplot_counts <- . %>% plot_ly(
+    x = ~yr_visit,
+    y = ~location_name,
+    z = ~sum_indiv,
+    xgap = 1, # adds the white lines btwn heatmap cells
+    ygap = 1,
+    height = total_page_ht,
+    # colorbar(orientation = "h"), # should be available in the next plot_ly package version
+    colorscale = color_table,
+    colorbar=list(title = "# of Indiv.", tickmode = "array", tickvals = 0:max_count, ticktext = names(vir_colors)),
+    zmin = 0, 
+    zmax = max_count, # finally figured how to set the colorbar limits
+    type = "heatmap",
+    text = ~hover_text,
+    hoverinfo ="text"
+    ) %>%
+  layout(
+    yaxis = list(
+      title = "Location Name",
+      tickfont = list(size=10),
+      tickprefix = "  " # hack for increasing space between y-axis title and tick labels
+    ),
+    xaxis = list(
+      title = "Survey Round (Year-Visit)",
+      tickmode = "array",
+      ticktext = sort(as.character(unique(dat$yr_visit))),
+      tickvals = sort(as.character(unique(dat$yr_visit))),
+      autorange = FALSE,
+      tickfont = list(size=10)
+      )) %>%
+  add_annotations(
+    text = ~unique(unit_code),
+    x = 0.5,
+    y = 1.02,
+    yref = "paper",
+    xref = "paper",
+    xanchor = "middle",
+    yanchor = "bottom",
+    showarrow = FALSE,
+    font = list(size = 15)
+    )
+
+# subplot view
+rv$dat %>%
+  dplyr::group_by(unit_code) %>%
+  plotly::do(p = subplot_counts(.)) %>%
+  subplot(
+      nrows = NROW(.),
+      shareX = FALSE,
+      shareY = FALSE,
+      titleX = TRUE,
+      titleY = TRUE,
+      heights = rel_heights,
+      margin = c(0, 0, 0.04, 0.01), # this is the subplot margin, L R T B
+      which_layout = 1) %>%
+  layout(
+    title = "Counts by location and survey event (not corrected for detection probability)",
+    margin = list(l = 75, r = 20,
+          b = 75, t = 75) # adds space to top and bottom of page
+  ) %>%
+  hide_colorbar(.)
+}
+
 # Reactable bar chart function 
 bar_chart <- function(label, width = "100%", height = "14px", fill = "#00bfc4", background = NULL) {
   bar <- div(style = list(background = fill, width = width, height = height))
@@ -73,68 +245,16 @@ style_avg_detect <- function(value) {
           color <- col_func(value/max(df_species[grep("avg_", names(df_species))], na.rm = T)) # normalize the values to color scale
           list(background = color)
 }
-
-FuncYrBoxPlotly <- function(dat) {
-  # total height
-  num_facet_rows <- length(unique(dat$unit_code))
-  total_page_ht <- 150 + 150 * num_facet_rows + 10 * num_facet_rows
-
-  # subplot function
-  subplot_box <- . %>% 
-    plot_ly(height = total_page_ht) %>%
-    add_trace(x = ~yr, y = ~sum_indiv, type = "box", boxmean = TRUE, color = I("gray"), alpha = 0) %>%
-    add_markers(x = ~jitter(yr),  # this is better than boxpoints b/c boxpoints can't have hover info
-                y = ~jitter(sum_indiv),
-                color = I("lightblue"),
-                marker = list(size = 6),
-                text = ~hover_text, 
-                hoverinfo = "text") %>%
-    layout(
-      xaxis = list(
-        title = "Year"
-        ),
-      yaxis = list(
-        title = "Counts per survey",
-        zeroline = T
-      )
-    ) %>%
-  add_annotations(
-    text = ~unique(unit_code),
-    x = 0.5,
-    y = 1.02,
-    yref = "paper",
-    xref = "paper",
-    xanchor = "middle",
-    yanchor = "bottom",
-    showarrow = FALSE,
-    font = list(size = 15)
-    )
-  
-  dat %>%
-    dplyr::group_by(unit_code) %>%
-    plotly::do(p = subplot_box(.)) %>%
-    subplot(
-      nrows = NROW(.), 
-      shareX = TRUE, 
-      shareY = TRUE,
-      titleX = TRUE,
-      margin = c(0.01, 0.01, 0.015, 0.01), # this is the subplot margin, L R T B
-      which_layout = 1) %>%
-    layout(
-      title = "Each (jittered) point is a point count",
-      margin = list(l = 75, r = 20,
-                    b = 75, t = 75) # adds space to top and bottom of page
-    ) %>%
-    hide_legend(.)
-}
 ```
 
 ```{r reactives}
 renderUI({
   shiny::req(!is.null(df_full_obs_cov), !is.null(input$sel_park), !is.null(input$sel_species))
-
+cat("line259")
   rv$dat <- df_full_obs_cov %>%
-    dplyr::filter(unit_code %in% input$sel_park & common_name %in% input$sel_species)
+    dplyr::filter(unit_code %in% input$sel_park & species_codename ==  input$sel_species)
+  cat("line262")
+ 
 })
 ```
 
@@ -145,7 +265,7 @@ renderUI({
 # > recoded phys Woodland* and Forest* b/c multiple versions of same category
 # > recoded sky conditions so order is fog < drizzle < rain, instead of rain < fog < drizzle
 
-
+df_finaldat <- readRDS(here::here("Data_out", "df_finaldat.RDS"))
 df_locs <- readRDS(here::here("Data_out", "df_locs.RDS")) # site locations
 df_survey_conditions <- readRDS(here::here("Data_out", "df_survey_conditions.RDS")) # event covariate data
 df_full_obs <- readRDS(here::here("Data_out", "df_full_obs.RDS"))
@@ -154,7 +274,9 @@ df_full_obs <- readRDS(here::here("Data_out", "df_full_obs.RDS"))
 df_full_obs_cov <- df_full_obs %>%
   dplyr::left_join(df_locs[c("location_name", "physiognomy", "hab_type")], by = "location_name") %>%
   dplyr::left_join(df_survey_conditions[c("location_name", "event_date", "julian_prop", "start_time_interval", "weather_wind", "weather_wind_num", "weather_temperature", "weather_sky", "weather_sky_revised_num", "weather_noise", "weather_noise_num")], by = c("location_name", "event_date")) %>%
-  dplyr::mutate(hover_text = paste0("<span style='font-size:16px; font-weight:bold;'>", unit_code, "<br>", paste0(scientific_name, " / ", common_name, " (", species_code, ")"), "</span><br>Location: ", location_name, "<br>Habitat Type: ", hab_type, "<br>Survey Date: ", event_date, "<br># of Individuals: ", sum_indiv))
+  dplyr::mutate(
+    species_codename = paste0(common_name, " (", species_code, ")"),
+    hover_text = paste0("<span style='font-size:16px; font-weight:bold;'>", unit_code, " ", yr, "<br>", paste0(scientific_name, " / ", common_name, " (", species_code, ")"), "</span><br>Location: ", location_name, "<br>Habitat Type: ", hab_type, "<br>Survey Date: ", event_date, "<br># of Individuals: ", sum_indiv))
 
 # Summary counts ----
 df_summary_yr_visit <- df_full_obs_cov %>%
@@ -212,7 +334,7 @@ rm(df_full_obs); rm(df_summary_yr_visit); rm(calc_avg_yr_visit); rm(species_spar
 
 ```
  
-Big Picture Summary of Sampling Effort
+Summary of Sampling
 =========================================
 
 Column {data-width=1}
@@ -220,12 +342,12 @@ Column {data-width=1}
 
 Column {data-width=30}
 -------------------------------------
+### Summary of data for analyses
+
 ### Distribution of sample location habitat types across park units
 ```{r}
 unique(df_full_obs_cov[c("unit_code", "location_name", "hab_type")]) %>% dplyr::select(unit_code, hab_type) %>% table() %>% knitr::kable(.) %>% kableExtra::kable_styling(., bootstrap_options = "striped", position = "center", full_width = F)
 ```
-
-### Summary of missed locations
 
 Column {data-width=60}
 -------------------------------------
@@ -289,19 +411,19 @@ survey_wk_heatdat %>%
       nrows = ceiling(NROW(.)/2), 
       shareX = TRUE, 
       shareY = TRUE,
-      margin = c(0.01, 0.01, 0.015, 0.01), # this is the subplot margin, L R T B
+      margin = c(0.01, 0.01, 0.025, 0.02), # this is the subplot margin, L R T B
       which_layout = 1) %>%
   layout(
-    title = "Survey weeks each year, by park unit (week 15 is mid-May; week 30 is July/Aug)",
+    title = "Survey weeks (in black) each year. Week 15 is mid-May; 30 is July/Aug.",
     margin = list(l = 75, r = 20,
-          b = 75, t = 75) # adds space to top and bottom of page
+          b = 120, t = 75) # adds space to top and bottom of page
 ) %>%
   hide_colorbar(.)
 })
 
 ```
 
-Big Picture Summary of Species Detections
+Summary of Species
 =========================================
 
 #### <font size="3">**Add instructions here**</font>
@@ -343,9 +465,7 @@ reactable::reactable(df_species,
                      filterable = TRUE,
                      defaultSortOrder = "desc",
                      defaultSorted = "AVG_PARKS",
-                     showPageSizeOptions = TRUE,
-                     pageSizeOptions = c(15,30,50),
-                     defaultPageSize = 15,
+                     showPageSizeOptions = FALSE,
                      fullWidth = TRUE,
                      width = "auto",
                      details = function(index) {
@@ -398,16 +518,35 @@ reactable::reactable(df_species,
 
 ```
 
-Drill-Down by Park and Species
+Summary of Covariate Relationships
 =========================================
 
 Inputs {.sidebar data-width=250}
 -------------------------------------
-```{r input} 
+```{r}
+
+```
+
+
+Drill-Down by Park
+=========================================
+
+Inputs {.sidebar data-width=300}
+-------------------------------------
+```{r}
+
+```
+
+Drill-Down by Species
+=========================================
+
+Inputs {.sidebar data-width=250}
+-------------------------------------
+```{r} 
 renderUI({
   shiny::req(!is.null(df_full_obs_cov))
   checkboxGroupInput("sel_park",
-                     label = h6("Select Park(s): "),
+                     label = strong("Select Park(s): "),
                      choices = sort(unique(df_full_obs_cov$unit_code)),
                      selected = switch(is.null(input$sel_park)+1, input$sel_park, unique(df_full_obs_cov$unit_code))
                      )
@@ -418,27 +557,43 @@ renderUI({
   selectInput(
     "sel_species",
     label = strong("Select a Species: "),
-    choices = sort(unique(df_full_obs_cov$common_name)),
-    selected = switch(is.null(input$sel_species)+1, input$sel_species, "Northern Cardinal")
+    choices = sort(unique(df_full_obs_cov$species_codename)),
+    selected = switch(is.null(input$sel_species)+1, input$sel_species, "Northern Cardinal (NOCA)")
     )
+  })
+
+renderUI({
+  checkboxInput("sel_freeY",
+                        label = h6("Allow y-axis to differ across boxplots"),
+                        value = switch(is.null(input$sel_freeY)+1, input$sel_freeY, TRUE))
   })
 ```
 
 Tabs {.tabset .tabset-fade}
 -------------------------------------
 
-### Attempt at Brushing
+### Boxplots of Counts
 
-Counts are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY.
+#### <font size="3">**Add instructions here**</font>
+
+* <font size="2"> Counts are the number of unique individuals detected during a point count, WITHOUT CORRECTING FOR DETECTION PROBABILITY. </font>
+
+* <font size="2"> Red line is loess smooth. Does NOT account for detection probability or differences in survey locations across years. </font>
+
+* <font size="2"> Blah </font>
 
 ```{r}
-renderPlotly({
-  shiny::req(!is.null(rv$dat))
-  FuncYrBoxPlotly(dat = rv$dat)
+output$out_BoxPlot <- renderPlotly({
+  shiny::req(!is.null(rv$dat), !is.null(input$sel_freeY), !is.null(input$sel_species), !is.null(input$sel_park))
+  cat("line597")
+  FuncYrBoxPlotly(dat = rv$dat, freeY = input$sel_freeY)
 })
+
+tags$style("#out_BoxPlot{height:100vh;overflow-x:scroll;overflow-y:scroll}")
+plotlyOutput('out_BoxPlot', height="100%", width = "100%")
 ```
 
-### Heatmap
+### Heatmaps of Counts
 
 #### <font size="3">**Add instructions here**</font>
 
@@ -449,88 +604,111 @@ renderPlotly({
 * <font size="2"> Blah </font>
 
 ```{r}
+output$out_HeatPlot <- renderPlotly({
+
+  shiny::req(!is.null(rv$dat), !is.null(input$sel_species), !is.null(input$sel_park))
+cat("line619")
+  FuncHeatCountPlotly(dat = rv$dat)
+})
+
+tags$style("#out_HeatPlot{height:100vh;overflow-y:scroll}")
+plotlyOutput('out_HeatPlot', height="100%", width = "90%")
+```
+
+### Covariate Patterns
+
+```{r}
+output$out_GroupedBox <- renderPlot({
+  shiny::req(!is.null(rv$dat), !is.null(input$sel_species))
+
+  grouped_box <- lapply(c("hab_type", "weather_wind", "weather_sky", "weather_noise"), function(z) {
+    ggplot(data = subset(rv$dat, !is.na(get(z))),  aes(x=unit_code, y=sum_indiv, fill = get(z), color = get(z))) + 
+      labs(title = switch(z, "hab_type" = "Covariate: Habitat Type", "weather_wind" = "Covariate: Wind", "weather_sky" = "Covariate: Weather Conditions", "weather_noise" = "Covariate: Ambient Noise"), x = NULL, y = "Count per Survey") +
+      geom_boxplot(alpha = 0.2, position = position_dodge(preserve = "single")) + # relatively new 'preserve' argument--nice! 
+      scale_fill_viridis_d(name = switch(z, "hab_type" = "habitat type", "weather_wind" = "wind", "weather_sky" = "weather conditions", "weather_noise" = "ambient noise")) +
+      scale_color_viridis_d() +
+      theme_bw(base_size = 16) +
+      theme(legend.position = "right") +
+      guides(color = "none") # remove the duplicate color legend
+  }
+  )
+  
+  temperature_points <- 
+    ggplot(data = rv$dat, aes(x = weather_temperature, y = sum_indiv)) + 
+    labs(title = "Covariate: Air Temperature (C)", x = "Air Temperature (C)", y = "Count per Survey", subtitle = "Point size is scaled to number of data points") +
+    geom_count(alpha = 0.5) +
+    theme_bw(base_size = 16) +
+    facet_wrap(vars(unit_code), ncol = 3)
+  
+  cov_plots <- patchwork::wrap_plots(grouped_box, ncol = 2)
+  
+  ppage <- patchwork::wrap_plots(
+      cov_plots, temperature_points, nrow = 2, heights = c(2, ceiling(length(unique(rv$dat$unit_code))/3)))
+ 
+   ppage + plot_annotation(title = paste0("Distribution of ", input$sel_species, " Counts Across Covariate Levels"), subtitle = "Plots are NOT interactive",
+    theme = theme(plot.title = element_text(size = 22), plot.subtitle = element_text(size = 18)))
+}, height = 1800)
+
+tags$style("#out_GroupedBox{height:100vh;overflow-x:scroll;overflow-y:scroll}")
+plotOutput('out_GroupedBox', height="100%", width = "90%")
+```
+
+### Patterns in Detection Distance
+
+#### <font size="3">**Add instructions here**</font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+```{r}
+
+
 renderPlotly({
+  shiny::req(!is.null(df_finaldat), !is.null(input$sel_park), !is.null(input$sel_species))
+  subdat <- df_finaldat %>%
+    dplyr::mutate(species_codename = paste0(common_name, " (", species_code, ")")) %>%
+    dplyr::filter(unit_code %in% input$sel_park, species_codename == input$sel_species) ### <<<<<<<<<<<<<<<<< PICK UP FROM HERE
+  ggplot(data = rv$dat, aes(x = dis))
+  )
+})
+ggplot(tt_raw, aes(x= distance_bin_id, weight = count)) + geom_bar()
+```
+
+### Patterns in Time-to-Detection
+
+#### <font size="3">**Add instructions here**</font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+```{r}
+
+```
+
+
+### Classification Tree
+
+#### <font size="3">**Add instructions here**</font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+* <font size="2"> Blah </font>
+
+```{r}
+output$out_TreePlot <- renderPlot({
   shiny::req(!is.null(rv$dat), !is.null(input$sel_species), !is.null(input$sel_park))
 
-# total height
-total_page_ht <- 150 + 15 * length(unique(rv$dat$location_name)) + 10 * length(unique(rv$dat$unit_code))
+  partykit::ctree(sum_indiv ~ as.factor(unit_code) + as.factor(hab_type) + weather_wind_num + weather_sky_revised_num + weather_temperature + weather_noise_num + julian_prop, data = rv$dat) %>% plot(.)
+  })
 
-# relative heights
-loc_heights <-
-  rv$dat %>% dplyr::group_by(unit_code) %>% summarize(num_locs = n_distinct(location_name)) %>% dplyr::pull(num_locs)+10 
-rel_heights <- proportions(loc_heights)
-
-# create discrete colorbar
-max_count <- max(rv$dat$sum_indiv, na.rm = TRUE)
-vir_colors <- c("#D3D3D3", scales::viridis_pal(direction = -1)(max_count)) # first one is light gray, which is assigned to count = 0
-names(vir_colors) = 0:max_count
-
-Z_Breaks = function(n){ # make the color table
-CUTS = seq(0,1,length.out=n+1)
-rep(CUTS,ifelse(CUTS %in% 0:1,1,2))
-}
-
-color_table <- data.frame(z=Z_Breaks(length(vir_colors)),
-col=rep(vir_colors,each=2),stringsAsFactors=FALSE)
-
-# subplot function
-subplot_counts <- . %>% plot_ly(
-    x = ~yr_visit,
-    y = ~location_name,
-    z = ~sum_indiv,
-    xgap = 1, # adds the white lines btwn heatmap cells
-    ygap = 1,
-    height = total_page_ht,
-    # colorbar(orientation = "h"), # should be available in the next plot_ly package version
-    colorscale = color_table,
-    colorbar=list(title = "# of Indiv.", tickmode = "array", tickvals = 0:max_count, ticktext = names(vir_colors)),
-    zmin = 0, 
-    zmax = max_count, # finally figured how to set the colorbar limits
-    type = "heatmap",
-    text = ~hover_text,
-    hoverinfo ="text"
-    ) %>%
-  layout(
-    yaxis = list(
-      title = "Location Name",
-      tickfont = list(size=10),
-      tickprefix = "  " # hack for increasing space between y-axis title and tick labels
-    ),
-    xaxis = list(
-      title = "Survey Round (Year-Visit)",
-      tickfont = list(size=10)
-      )) %>%
-  add_annotations(
-    text = ~unique(unit_code),
-    x = 0.5,
-    y = 1.02,
-    yref = "paper",
-    xref = "paper",
-    xanchor = "middle",
-    yanchor = "bottom",
-    showarrow = FALSE,
-    font = list(size = 15)
-    )
-
-# subplot view
-rv$dat %>%
-  dplyr::group_by(unit_code) %>%
-  plotly::do(p = subplot_counts(.)) %>%
-  subplot(
-      nrows = NROW(.),
-      shareX = FALSE,
-      shareY = FALSE,
-      titleX = FALSE,
-      titleY = TRUE,
-      heights = rel_heights,
-      margin = c(0, 0, 0.04, 0.01), # this is the subplot margin, L R T B
-      which_layout = 1) %>%
-  layout(
-    title = "Counts by location and survey event (not corrected for detection probability)",
-    margin = list(l = 75, r = 20,
-          b = 75, t = 75) # adds space to top and bottom of page
-  ) %>%
-  hide_colorbar(.)
-
-})
+tags$style("#out_TreePlot{height:100vh;overflow-x:scroll;overflow-y:scroll}")
+plotOutput("out_TreePlot", height="100%", width = "80%")
 ```
